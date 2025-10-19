@@ -1,9 +1,10 @@
-# app.py — Mental Health Multiclass Classifier (Final)
-# ----------------------------------------------------
+# app.py — Mental Health Multiclass Classifier (Real-time Form UI)
+# ----------------------------------------------------------------
 # Tabs: PREDICT | EXPLAIN | ASSISTANT
-# Pipelines: sklearn/imb pipelines saved as .joblib with steps ['prep','sampler','clf']
-# LabelEncoder paired as a .joblib
-# ----------------------------------------------------
+# - No CSV uploads. Users fill a form; we build a single-row DataFrame and predict.
+# - Uses your saved sklearn/imb pipeline (.joblib) and paired LabelEncoder (.joblib)
+# - Works with your Early-Warning models; symptom questions are optional (for user feedback).
+# ----------------------------------------------------------------
 
 from __future__ import annotations
 import os, json
@@ -25,14 +26,14 @@ except Exception:
 # --------------------------- Page & Consent ---------------------------
 st.set_page_config(page_title="Mental Health Classifier", page_icon="🧠", layout="centered")
 
-st.title("🧠 Mental Health Multiclass Classifier")
+st.title("🧠 Mental Health Multiclass Classifier — Real-time")
 st.caption(
     "Research prototype — not medical advice. Predictions are for educational use only. "
     "If you or someone you know is at risk, contact local emergency/crisis services immediately."
 )
 with st.expander("Consent & Privacy", expanded=False):
     st.write(
-        "- By using this tool you consent to processing your uploaded inputs for research-quality analytics.\n"
+        "- By using this tool you consent to processing your inputs for research-quality analytics.\n"
         "- We do **not** store PII. We only log timestamp, target, predicted class, and risk tier.\n"
         "- This tool does **not** triage crisis situations."
     )
@@ -59,7 +60,6 @@ DEFAULTS = {
 }
 
 # --------------------------- Intervention plan ---------------------------
-# Map predicted label -> risk tier + suggested actions
 RISK_PLAN = {
     "Anxiety": {
         "tiers": {
@@ -88,7 +88,7 @@ RISK_PLAN = {
 }
 
 def _risk_from_text(label_text: str) -> tuple[str, list[str]]:
-    """Fallback mapping if labels are strings like 'Mild Anxiety'."""
+    """Fallback mapping if model classes are strings (e.g., 'Moderate Anxiety')."""
     lt = label_text.lower()
     if "severe" in lt:   return ("Severe",   RISK_PLAN["Anxiety"]["tiers"]["3"][1])
     if "moderate" in lt: return ("Moderate", RISK_PLAN["Anxiety"]["tiers"]["2"][1])
@@ -102,7 +102,6 @@ def to_risk(target_name: str, predicted_label) -> tuple[str, list[str]]:
     key = str(predicted_label)
     if key.isdigit() and key in tiers:
         return tiers[key]
-    # label is text like 'Moderate Anxiety' — map by keywords
     return _risk_from_text(str(predicted_label))
 
 # --------------------------- Cached loaders ---------------------------
@@ -124,7 +123,7 @@ def read_metadata(path: str) -> dict:
     except Exception:
         return {}
 
-# --------------------------- Column helpers ---------------------------
+# --------------------------- Column & logging helpers ---------------------------
 def expected_raw_columns(pipe) -> list[str]:
     """Return raw input columns expected before One-Hot."""
     prep = pipe.named_steps["prep"]
@@ -133,172 +132,181 @@ def expected_raw_columns(pipe) -> list[str]:
     cat_cols = list(prep.transformers_[1][2]) if len(prep.transformers_) > 1 else []
     return list(num_cols) + list(cat_cols)
 
-def check_missing_or_extra(upload_cols: list[str], expected_cols: list[str]):
-    upload_set, expected_set = set(upload_cols), set(expected_cols)
-    missing = list(expected_set - upload_set)
-    extra   = list(upload_set - expected_set)
-    return missing, extra
-
 def safe_inverse_transform(le, y_pred):
     try: return le.inverse_transform(y_pred)
     except Exception: return y_pred
 
-def append_log(df_pred: pd.DataFrame, target: str, path="prediction_log.csv"):
-    cols = ["timestamp","target","prediction","risk_tier"]
-    log_df = pd.DataFrame({
-        "timestamp": [datetime.utcnow().isoformat()] * len(df_pred),
-        "target": [target] * len(df_pred),
-        "prediction": df_pred["prediction"],
-        "risk_tier": df_pred["risk_tier"],
-    })[cols]
-    if os.path.exists(path):
-        log_df.to_csv(path, mode="a", header=False, index=False)
-    else:
-        log_df.to_csv(path, index=False)
+def append_log_row(target: str, label_text: str, risk_tier: str, path="prediction_log.csv"):
+    row = pd.DataFrame([{
+        "timestamp": datetime.utcnow().isoformat(),
+        "target": target,
+        "prediction": label_text,
+        "risk_tier": risk_tier,
+    }])
+    if os.path.exists(path): row.to_csv(path, mode="a", header=False, index=False)
+    else: row.to_csv(path, index=False)
 
 # --------------------------- Sidebar ---------------------------
 st.sidebar.header("Configuration")
-
 target = st.sidebar.selectbox("Choose target", ["Anxiety", "Stress", "Depression"], index=0)
 
 model_path  = st.sidebar.text_input("Model pipeline (.joblib)",  DEFAULTS[target]["model"])
 enc_path    = st.sidebar.text_input("Label encoder (.joblib)",    DEFAULTS[target]["encoder"])
 meta_path   = st.sidebar.text_input("Metadata (.json, optional)", DEFAULTS[target]["meta"])
 
-show_template = st.sidebar.button("Show expected columns + download CSV template")
-
-# Load on demand for template or prediction
-pipe, le, meta = None, None, {}
-
-if show_template:
-    try:
-        pipe = load_pipeline(model_path)
-        cols = expected_raw_columns(pipe)
-        st.info("Expected raw columns (CSV must contain these):")
-        st.code(", ".join(cols), language="text")
-        template = pd.DataFrame([{c: "" for c in cols}])
-        st.download_button("Download CSV template", template.to_csv(index=False).encode("utf-8"),
-                           file_name=f"template_{target.lower()}.csv", mime="text/csv")
-    except Exception as e:
-        st.error(f"Cannot inspect columns: {e}")
+mode = st.sidebar.radio("Prediction mode", ["Quick Check (Early-Warning)", "Symptom Check (Assessment)"], index=0)
 
 # --------------------------- Tabs ---------------------------
 tab_pred, tab_explain, tab_assist = st.tabs(["🔮 Predict", "🔍 Explain", "🤝 Assistant"])
 
 # ============== PREDICT TAB ==============
 with tab_pred:
-    st.subheader("Upload data and generate predictions")
+    st.subheader("Answer a few questions to get your result")
 
-    uploaded = st.file_uploader("Upload CSV with the expected raw columns", type=["csv"])
-    if uploaded is not None:
+    # Load model/encoder once
+    try:
+        pipe = load_pipeline(model_path)
+        le   = load_encoder(enc_path)
+        exp_cols = expected_raw_columns(pipe)
+    except Exception as e:
+        st.error(f"Failed to load model/encoder: {e}")
+        st.stop()
+
+    # --- Common form fields (Early-Warning inputs)
+    with st.form("realtime_form", clear_on_submit=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            age = st.number_input("Age", min_value=15, max_value=80, value=22, step=1)
+            cgpa = st.number_input("Current CGPA", min_value=0.0, max_value=4.0, value=3.50, step=0.01, format="%.2f")
+            gender = st.selectbox("Gender", ["Male", "Female", "Other"], index=0)
+            academic_year = st.selectbox("Academic Year", ["1st","2nd","3rd","4th"], index=2)
+        with c2:
+            university = st.text_input("University", value="DIU")
+            department = st.text_input("Department", value="CSE")
+            waiver = st.selectbox("Waiver or Scholarship", ["No","Yes"], index=0)
+
+        # --- Optional symptom questions (for user feedback/assessment)
+        gad_vals, pss_vals, dass_vals = {}, {}, {}
+        if mode == "Symptom Check (Assessment)":
+            st.markdown("**Symptom Questionnaire (optional)**")
+            if target == "Anxiety":
+                st.caption("GAD-7 style inputs (1–4). Choose what fits best.")
+                for i in range(1,8):
+                    gad_vals[f"GAD{i}"] = st.select_slider(f"GAD{i}", options=[1,2,3,4], value=2)
+            elif target == "Stress":
+                st.caption("PSS-10 style inputs (1–4).")
+                for i in range(1,11):
+                    pss_vals[f"PSS{i}"] = st.select_slider(f"PSS{i}", options=[1,2,3,4], value=2)
+            elif target == "Depression":
+                st.caption("DASS-D7 style inputs (1–4).")
+                for i in range(1,8):
+                    dass_vals[f"DASS_D{i}"] = st.select_slider(f"DASS_D{i}", options=[1,2,3,4], value=2)
+
+        submitted = st.form_submit_button("Get Prediction")
+
+    if submitted:
         try:
-            df_in = pd.read_csv(uploaded)
-            st.write("**Preview**")
-            st.dataframe(df_in.head(20), use_container_width=True)
+            # Build a single-row DataFrame **only** with columns the pipeline expects
+            raw = {
+                "Age": age,
+                "Current_CGPA": cgpa,
+                "Gender": gender,
+                "University": university,
+                "Department": department,
+                "Academic_Year": academic_year,
+                "waiver_or_scholarship": waiver
+            }
+            # If the model expects symptom items (e.g., replication models), include them if present in exp_cols
+            for k, v in {**gad_vals, **pss_vals, **dass_vals}.items():
+                if k in exp_cols: raw[k] = v
 
-            if pipe is None:
-                pipe = load_pipeline(model_path)
-            if le is None:
-                le = load_encoder(enc_path)
-            if not meta:
-                meta = read_metadata(meta_path)
+            # ensure all expected columns exist (fill missing with np.nan)
+            row_dict = {c: raw.get(c, np.nan) for c in exp_cols}
+            df_in = pd.DataFrame([row_dict])
 
-            exp_cols = expected_raw_columns(pipe)
-            missing, extra = check_missing_or_extra(df_in.columns.tolist(), exp_cols)
-            if missing:
-                st.error(f"Missing required columns ({len(missing)}): {missing[:12]}{' ...' if len(missing)>12 else ''}")
-                st.stop()
-            if extra:
-                st.info(f"Upload has extra columns ({len(extra)}). They’ll be ignored by the pipeline.")
+            # Predict
+            pred = pipe.predict(df_in)
+            label = safe_inverse_transform(le, pred)[0]
+            risk, actions = to_risk(target, label)
 
-            preds = pipe.predict(df_in)
-            labels = safe_inverse_transform(le, preds)
+            st.success(f"**Prediction:** {label}")
+            st.write(f"**Risk tier:** {risk}")
+            st.write(f"**Suggested actions:** " + " • ".join(actions))
 
-            out = df_in.copy()
-            out["prediction"] = labels
-
-            # Interventions
-            risk_names, action_lists = [], []
-            for lab in labels:
-                risk, acts = to_risk(target, lab)
-                risk_names.append(risk)
-                action_lists.append(" • ".join(acts))
-            out["risk_tier"] = risk_names
-            out["suggested_actions"] = action_lists
-
-            # Display
-            st.success("✅ Predictions ready")
-            st.dataframe(out[["prediction","risk_tier","suggested_actions"]].head(20),
-                        use_container_width=True)
+            # Show a compact table with the inputs and output
+            show = df_in.copy()
+            show["prediction"] = [label]
+            show["risk_tier"] = [risk]
+            st.dataframe(show, use_container_width=True)
 
             # Log (no PII)
-            append_log(out, target)
+            append_log_row(target, str(label), str(risk))
 
-            # Download
-            st.download_button("📥 Download predictions CSV",
-                               out.to_csv(index=False).encode("utf-8"),
-                               file_name=f"predictions_{target.lower()}.csv",
-                               mime="text/csv")
+            # Save to session for Explain tab
+            st.session_state["last_df_in"] = df_in
+            st.session_state["last_label"] = label
+            st.session_state["last_pipe"] = pipe
 
-            # Save last input/preds to session for Explain tab
-            st.session_state["df_in"] = df_in
-            st.session_state["labels"] = labels
-            st.session_state["pipe"] = pipe
-
-            if meta:
-                st.caption(f"Model: {meta.get('model','?')} | Classes: {meta.get('classes','?')}")
+            # Optional: simple symptom score echo (for the user)
+            if mode == "Symptom Check (Assessment)":
+                if target == "Anxiety" and gad_vals:
+                    gad_score = sum(gad_vals.values())
+                    st.caption(f"GAD-like total (1–4 per item): **{gad_score}** (7 items)")
+                if target == "Stress" and pss_vals:
+                    pss_score = sum(pss_vals.values())
+                    st.caption(f"PSS-like total (1–4 per item): **{pss_score}** (10 items)")
+                if target == "Depression" and dass_vals:
+                    dass_score = sum(dass_vals.values())
+                    st.caption(f"DASS-D-like total (1–4 per item): **{dass_score}** (7 items)")
 
         except Exception as e:
             st.error(f"Prediction failed: {e}")
 
 # ============== EXPLAIN TAB ==============
 with tab_explain:
-    st.subheader("Explain a single prediction (tree models)")
+    st.subheader("Explain the latest prediction (tree models)")
     if not _HAS_SHAP:
         st.info("Install `shap` in requirements.txt to enable explanations.")
     else:
-        if "df_in" not in st.session_state or "pipe" not in st.session_state:
-            st.caption("Run a prediction first in the **Predict** tab.")
+        if "last_df_in" not in st.session_state or "last_pipe" not in st.session_state:
+            st.caption("Make a prediction first in the **Predict** tab.")
         else:
-            df_in = st.session_state["df_in"]
-            pipe  = st.session_state["pipe"]
-            labels = st.session_state.get("labels", None)
+            df_in = st.session_state["last_df_in"]
+            pipe  = st.session_state["last_pipe"]
+            label = st.session_state.get("last_label", None)
 
-            row_idx = st.number_input("Row index to explain", min_value=0, max_value=len(df_in)-1, value=0, step=1)
-            if st.button("Explain this row"):
-                try:
-                    # Only reasonable for tree models (RF/LGBM/XGB/CatBoost)
-                    clf = pipe.named_steps["clf"]
-                    name = clf.__class__.__name__
-                    if not any(k in name.lower() for k in ["forest", "xgb", "lgbm", "catboost", "tree"]):
-                        st.warning(f"Explainability is only enabled for tree/boosting models. Detected: {name}")
-                    else:
-                        prep = pipe.named_steps["prep"]
-                        X_trans = prep.transform(df_in)  # transformed features
-                        # Build explainer directly on tree model
-                        explainer = shap.Explainer(clf)
-                        sv = explainer(X_trans[row_idx:row_idx+1])
+            try:
+                clf = pipe.named_steps["clf"]
+                name = clf.__class__.__name__
+                if not any(k in name.lower() for k in ["forest", "xgb", "lgbm", "catboost", "tree"]):
+                    st.warning(f"Explainability is enabled for tree/boosting models. Detected: {name}")
+                else:
+                    prep = pipe.named_steps["prep"]
+                    X_trans = prep.transform(df_in)  # transformed features
+                    explainer = shap.Explainer(clf)
+                    sv = explainer(X_trans)
 
-                        if labels is not None:
-                            st.write("Predicted class:", labels[row_idx])
+                    if label is not None:
+                        st.write("Predicted class:", label)
 
-                        st.write("Top feature contributions:")
-                        # Plot bar (max 12)
-                        shap.plots.bar(sv[0], max_display=12, show=False)
-                        st.pyplot(bbox_inches="tight")
-                except Exception as e:
-                    st.error(f"Explainability failed: {e}")
+                    st.write("Top feature contributions for your last submission:")
+                    shap.plots.bar(sv[0], max_display=12, show=False)
+                    st.pyplot(bbox_inches="tight")
+
+            except Exception as e:
+                st.error(f"Explainability failed: {e}")
 
 # ============== ASSISTANT TAB ==============
 with tab_assist:
     st.subheader("Non-clinical Assistant")
-    st.caption("Ask about breathing, sleep, time management, or support options.")
+    st.caption("Ask about breathing, sleep, time management, or support options. For emergencies, contact local services.")
 
     FAQ = {
         "breathing": "Try 4–7–8 breathing: inhale 4s, hold 7s, exhale 8s, for 4 rounds.",
         "sleep": "Aim for 7–9 hours. Keep consistent sleep/wake times; avoid screens 1 hour before bed.",
         "time management": "Use Pomodoro: 25m focus + 5m break. After 4 cycles, take a 20m break.",
         "support": "Consider speaking to your student counseling service or a trusted mentor.",
+        "study stress": "Break tasks into chunks. 25-minute focus blocks, 5-minute breaks. Prioritize 1–2 high-impact tasks."
     }
 
     def faq_bot(query: str) -> str:
@@ -306,7 +314,7 @@ with tab_assist:
         for k, v in FAQ.items():
             if k in q:
                 return v
-        return ("I can help with breathing, sleep, time management, and support options. "
+        return ("I can help with breathing, sleep, time management, support options, and study stress. "
                 "Try asking about one of those.")
 
     user_q = st.text_input("Type a question (e.g., 'How to manage stress before exams?')")
