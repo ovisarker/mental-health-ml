@@ -18,7 +18,6 @@ if not hasattr(ct, '_RemainderColsList'):
 # 🌈 Page Config
 # ---------------------------------------------------------------
 st.set_page_config(page_title="AI Mental Health System v2", page_icon="🧠", layout="wide")
-
 tabs = st.tabs(["🔮 Prediction", "📊 Dashboard Analytics"])
 
 # ---------------------------------------------------------------
@@ -29,12 +28,12 @@ def load_model(target_name):
     models = {
         "Anxiety": "final_anxiety_model.joblib",
         "Stress": "final_stress_model.joblib",
-        "Depression": "final_depression_model.joblib"
+        "Depression": "final_depression_model.joblib"  # must exist
     }
     encoders = {
         "Anxiety": "final_anxiety_encoder.joblib",
         "Stress": "final_stress_encoder.joblib",
-        "Depression": "final_depression_encoder.joblib"
+        "Depression": "final_depression_encoder.joblib"  # must exist
     }
     model = joblib.load(models[target_name])
     encoder = joblib.load(encoders[target_name])
@@ -68,17 +67,22 @@ def interpret_risk(target, label_index):
     return ("Unknown", ["Consult professional for personalized support"])
 
 # ---------------------------------------------------------------
-# TAB 1 — PREDICTION INTERFACE
+# TAB 1 — PREDICTION
 # ---------------------------------------------------------------
 with tabs[0]:
     st.title("🧠 AI-based Mental Health Detection & Support System")
     st.caption("Developed for Thesis & Real-world Use | 2025")
 
     target = st.selectbox("Select what you want to predict:", ["Anxiety", "Stress", "Depression"])
-    model, encoder = load_model(target)
-    st.success(f"✅ {target} model loaded successfully!")
 
-    # Questions
+    try:
+        model, encoder = load_model(target)
+        st.success(f"✅ {target} model loaded successfully!")
+    except Exception as e:
+        st.error(f"❌ Model or encoder missing: {e}")
+        st.stop()
+
+    # Question sets
     if target == "Anxiety":
         st.subheader("🧠 Anxiety Screening (GAD-7 Scale)")
         questions = {
@@ -118,25 +122,27 @@ with tabs[0]:
             "PHQ9": "Thoughts of self-harm or death"
         }
 
-    # Questionnaire
+    # Inputs
     inputs = {}
     for key, q in questions.items():
         inputs[key] = st.slider(f"{q} (1 = Not at all, 5 = Nearly every day)", 1, 5, 3)
 
-    # Dummy demographic columns
-    for col in ['Age','Current_CGPA','Gender','University','Department','Academic_Year','waiver_or_scholarship']:
-        inputs[col] = 0 if 'CGPA' in col else 'N/A'
+    # Numeric placeholders (for model’s required columns)
+    for col in ['Age', 'Current_CGPA']:
+        inputs[col] = 0.0
+    for col in ['Gender', 'University', 'Department', 'Academic_Year', 'waiver_or_scholarship']:
+        inputs[col] = "Unknown"
 
-    # Predict button
     if st.button("🔍 Predict Mental Health Status"):
         try:
             X = pd.DataFrame([inputs])
             pred_encoded = model.predict(X)[0]
             pred_label = encoder.inverse_transform([pred_encoded])[0]
             risk_tier, suggestions = interpret_risk(target, pred_encoded)
+
             st.success(f"🧩 Predicted: **{pred_label}**")
             st.info(f"**Risk Level:** {risk_tier}\n\n**Suggested Actions:** " + " • ".join(suggestions))
-            # Log
+
             log = pd.DataFrame({
                 "timestamp": [datetime.utcnow().isoformat()],
                 "target": [target],
@@ -145,17 +151,19 @@ with tabs[0]:
             })
             log.to_csv("prediction_log.csv", mode='a', header=not os.path.exists("prediction_log.csv"), index=False)
             st.toast("✅ Logged successfully!")
+
         except Exception as e:
             st.error(f"Prediction failed: {e}")
 
 # ---------------------------------------------------------------
-# TAB 2 — DASHBOARD ANALYTICS
+# TAB 2 — DASHBOARD
 # ---------------------------------------------------------------
 with tabs[1]:
     st.title("📊 Mental Health Prediction Dashboard")
     if os.path.exists("prediction_log.csv"):
         df = pd.read_csv("prediction_log.csv")
         df['timestamp'] = pd.to_datetime(df['timestamp'])
+
         col1, col2 = st.columns(2)
         with col1:
             fig1 = px.histogram(df, x="target", color="prediction", title="Prediction Distribution by Type")
