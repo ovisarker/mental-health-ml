@@ -7,67 +7,94 @@ from datetime import datetime
 import plotly.express as px
 
 # ---------------------------------------------------------------
-# 🧩 Compatibility patch
+# 🧩 Compatibility patch for sklearn 1.5+ joblib issues
 # ---------------------------------------------------------------
 import sklearn.compose._column_transformer as ct
-if not hasattr(ct, '_RemainderColsList'):
+if not hasattr(ct, "_RemainderColsList"):
     class _RemainderColsList(list): pass
     ct._RemainderColsList = _RemainderColsList
 
 # ---------------------------------------------------------------
-# 🌈 Page Config
+# 🌈 Streamlit Page Config
 # ---------------------------------------------------------------
-st.set_page_config(page_title="AI Mental Health System v2", page_icon="🧠", layout="wide")
+st.set_page_config(
+    page_title="AI Mental Health System v2",
+    page_icon="🧠",
+    layout="wide"
+)
+
 tabs = st.tabs(["🔮 Prediction", "📊 Dashboard Analytics"])
 
 # ---------------------------------------------------------------
-# COMMON FUNCTIONS
+# ⚙️ Helper functions
 # ---------------------------------------------------------------
 @st.cache_resource
 def load_model(target_name):
+    """Load model and encoder for the selected target."""
     models = {
         "Anxiety": "final_anxiety_model.joblib",
         "Stress": "final_stress_model.joblib",
-        "Depression": "final_depression_model.joblib"  # must exist
+        "Depression": "final_depression_model.joblib"
     }
     encoders = {
         "Anxiety": "final_anxiety_encoder.joblib",
         "Stress": "final_stress_encoder.joblib",
-        "Depression": "final_depression_encoder.joblib"  # must exist
+        "Depression": "final_depression_encoder.joblib"
     }
-    model = joblib.load(models[target_name])
-    encoder = joblib.load(encoders[target_name])
+
+    model_path = models.get(target_name)
+    encoder_path = encoders.get(target_name)
+
+    if not os.path.exists(model_path) or not os.path.exists(encoder_path):
+        raise FileNotFoundError(f"Missing model or encoder file for: {target_name}")
+
+    model = joblib.load(model_path)
+    encoder = joblib.load(encoder_path)
     return model, encoder
+
 
 RISK_PLAN = {
     "Anxiety": {
         0: ("Low", ["Maintain routine", "Sleep 7–9h", "Daily relaxation"]),
         1: ("Mild", ["Breathing 4-7-8", "Journal for 10 minutes"]),
         2: ("Moderate", ["Peer support", "Try mindfulness exercise"]),
-        3: ("Severe", ["Reach counselor", "Immediate support recommended"])
+        3: ("Severe", ["Reach counselor", "Immediate support recommended"]),
     },
     "Stress": {
         0: ("Low", ["Take breaks", "Walk 15 minutes"]),
         1: ("Mild", ["Time blocking", "Prioritize 3 key tasks"]),
         2: ("Moderate", ["Meet advisor", "Try relaxation training"]),
-        3: ("Severe", ["Contact student wellbeing center", "Crisis support if needed"])
+        3: ("Severe", ["Contact student wellbeing center", "Crisis support if needed"]),
     },
     "Depression": {
         0: ("Low", ["Stay socially active", "Practice gratitude"]),
         1: ("Mild", ["Plan one small positive activity per day"]),
         2: ("Moderate", ["Consider counseling", "Monitor mood daily"]),
-        3: ("Severe", ["Contact mental health professional", "Create safety plan"])
-    }
+        3: ("Severe", ["Contact mental health professional", "Create safety plan"]),
+    },
 }
 
-def interpret_risk(target, label_index):
-    label_index = int(label_index) if isinstance(label_index, (np.int64, np.int32, float)) else 0
-    if label_index in RISK_PLAN[target]:
-        return RISK_PLAN[target][label_index]
-    return ("Unknown", ["Consult professional for personalized support"])
+
+def interpret_risk(target, label):
+    """Automatically detect severity text or numeric level."""
+    try:
+        label_str = str(label).lower()
+        if "low" in label_str:
+            return RISK_PLAN[target][0]
+        elif "mild" in label_str:
+            return RISK_PLAN[target][1]
+        elif "moderate" in label_str:
+            return RISK_PLAN[target][2]
+        elif "severe" in label_str:
+            return RISK_PLAN[target][3]
+        else:
+            return ("Unknown", ["Consult professional for personalized support"])
+    except Exception:
+        return ("Unknown", ["Consult professional for personalized support"])
+
 
 # ---------------------------------------------------------------
-# TAB 1 — PREDICTION
+# 🧠 TAB 1 — PREDICTION INTERFACE
 # ---------------------------------------------------------------
 with tabs[0]:
     st.title("🧠 AI-based Mental Health Detection & Support System")
@@ -82,7 +109,9 @@ with tabs[0]:
         st.error(f"❌ Model or encoder missing: {e}")
         st.stop()
 
-    # Question sets
+    # -------------------------------
+    # Dynamic questionnaire
+    # -------------------------------
     if target == "Anxiety":
         st.subheader("🧠 Anxiety Screening (GAD-7 Scale)")
         questions = {
@@ -92,8 +121,9 @@ with tabs[0]:
             "GAD4": "Trouble relaxing",
             "GAD5": "Being so restless that it is hard to sit still",
             "GAD6": "Becoming easily annoyed or irritable",
-            "GAD7": "Feeling afraid as if something awful might happen"
+            "GAD7": "Feeling afraid as if something awful might happen",
         }
+
     elif target == "Stress":
         st.subheader("😣 Stress Screening (PSS-10 Scale)")
         questions = {
@@ -106,8 +136,9 @@ with tabs[0]:
             "PSS7": "Able to control irritations in your life",
             "PSS8": "Felt on top of things",
             "PSS9": "Angry because things were out of control",
-            "PSS10": "Felt difficulties piling up too high"
+            "PSS10": "Felt difficulties piling up too high",
         }
+
     else:
         st.subheader("😔 Depression Screening (PHQ-9 Scale)")
         questions = {
@@ -119,64 +150,95 @@ with tabs[0]:
             "PHQ6": "Feeling bad about yourself",
             "PHQ7": "Trouble concentrating",
             "PHQ8": "Moving/speaking slowly or being restless",
-            "PHQ9": "Thoughts of self-harm or death"
+            "PHQ9": "Thoughts of self-harm or death",
         }
 
-    # Inputs
+    # -------------------------------
+    # User Inputs
+    # -------------------------------
     inputs = {}
     for key, q in questions.items():
         inputs[key] = st.slider(f"{q} (1 = Not at all, 5 = Nearly every day)", 1, 5, 3)
 
-    # Numeric placeholders (for model’s required columns)
-    for col in ['Age', 'Current_CGPA']:
-        inputs[col] = 0.0
-    for col in ['Gender', 'University', 'Department', 'Academic_Year', 'waiver_or_scholarship']:
-        inputs[col] = "Unknown"
+    # Fill required columns automatically
+    numeric_defaults = {"Age": 0.0, "Current_CGPA": 0.0}
+    text_defaults = {
+        "Gender": "Unknown",
+        "University": "Unknown",
+        "Department": "Unknown",
+        "Academic_Year": "Unknown",
+        "waiver_or_scholarship": "Unknown",
+    }
+    inputs.update(numeric_defaults)
+    inputs.update(text_defaults)
 
+    # -------------------------------
+    # Prediction button
+    # -------------------------------
     if st.button("🔍 Predict Mental Health Status"):
         try:
             X = pd.DataFrame([inputs])
             pred_encoded = model.predict(X)[0]
-            pred_label = encoder.inverse_transform([pred_encoded])[0]
-            risk_tier, suggestions = interpret_risk(target, pred_encoded)
+
+            # Try decoding label if encoder exists
+            try:
+                pred_label = encoder.inverse_transform([pred_encoded])[0]
+            except Exception:
+                pred_label = str(pred_encoded)
+
+            risk_tier, suggestions = interpret_risk(target, pred_label)
 
             st.success(f"🧩 Predicted: **{pred_label}**")
             st.info(f"**Risk Level:** {risk_tier}\n\n**Suggested Actions:** " + " • ".join(suggestions))
 
+            # Save to log
             log = pd.DataFrame({
                 "timestamp": [datetime.utcnow().isoformat()],
                 "target": [target],
                 "prediction": [pred_label],
-                "risk": [risk_tier]
+                "risk": [risk_tier],
             })
-            log.to_csv("prediction_log.csv", mode='a', header=not os.path.exists("prediction_log.csv"), index=False)
+            log.to_csv(
+                "prediction_log.csv",
+                mode="a",
+                header=not os.path.exists("prediction_log.csv"),
+                index=False,
+            )
             st.toast("✅ Logged successfully!")
 
         except Exception as e:
             st.error(f"Prediction failed: {e}")
 
 # ---------------------------------------------------------------
-# TAB 2 — DASHBOARD
+# 📊 TAB 2 — DASHBOARD ANALYTICS
 # ---------------------------------------------------------------
 with tabs[1]:
     st.title("📊 Mental Health Prediction Dashboard")
+
     if os.path.exists("prediction_log.csv"):
         df = pd.read_csv("prediction_log.csv")
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
 
         col1, col2 = st.columns(2)
         with col1:
-            fig1 = px.histogram(df, x="target", color="prediction", title="Prediction Distribution by Type")
+            fig1 = px.histogram(
+                df, x="target", color="prediction",
+                title="Prediction Distribution by Type"
+            )
             st.plotly_chart(fig1, use_container_width=True)
+
         with col2:
             fig2 = px.pie(df, names="risk", title="Risk Tier Distribution")
             st.plotly_chart(fig2, use_container_width=True)
 
         st.markdown("### 📅 Daily Prediction Activity")
-        df['date'] = df['timestamp'].dt.date
-        fig3 = px.line(df.groupby(['date','target']).size().reset_index(name='count'),
-                       x='date', y='count', color='target', markers=True,
-                       title='Daily Prediction Count by Category')
+        df["date"] = df["timestamp"].dt.date
+        fig3 = px.line(
+            df.groupby(["date", "target"]).size().reset_index(name="count"),
+            x="date", y="count", color="target", markers=True,
+            title="Daily Prediction Count by Category"
+        )
         st.plotly_chart(fig3, use_container_width=True)
+
     else:
         st.warning("No predictions logged yet. Make some predictions first!")
