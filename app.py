@@ -3,6 +3,16 @@
 # Version: Final (Thesis + Deployment)
 # Developed by: Ovi Sarker & BM Sabbir Hossen Riad (2025)
 # ============================================================
+import joblib
+import sklearn
+from sklearn.utils import _joblib
+
+# ✅ Compatibility patch for sklearn deserialization
+import sys
+import sklearn.compose._column_transformer as ct
+if not hasattr(ct, '_RemainderColsList'):
+    class _RemainderColsList(list): pass
+    ct._RemainderColsList = _RemainderColsList
 
 import streamlit as st
 import pandas as pd
