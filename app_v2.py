@@ -43,7 +43,7 @@ def load_model(target_name):
     """Load specific model + encoder"""
     models = {
         "Anxiety": "final_anxiety_model.joblib",
-        "Stress": "best_model_Stress_Label_Logistic_Regression.joblib",
+        "Stress": "final_stress_model.joblib",
         "Depression": "best_model_Depression_Label_SVM.joblib",
     }
     encoders = {
