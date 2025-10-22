@@ -1,6 +1,6 @@
 # ==========================================
-# 🧠 AI-based Mental Health Detection & Support System (v3-Fixed)
-# Thesis + Real-World Edition | 2025
+# 🧠 AI-based Mental Health Detection System (v3-Final)
+# Fully Stable Edition | 2025
 # ==========================================
 
 import streamlit as st
@@ -11,17 +11,10 @@ import altair as alt
 from datetime import datetime
 
 # -----------------------------
-# ⚙️ Page Setup
+# ⚙️ Setup
 # -----------------------------
-st.set_page_config(
-    page_title="AI-based Mental Health Detection System",
-    layout="wide",
-    page_icon="🧠"
-)
+st.set_page_config(page_title="AI-based Mental Health System", layout="wide", page_icon="🧠")
 
-# -----------------------------
-# 🌙 Styling
-# -----------------------------
 st.markdown("""
 <style>
 body {background-color:#0E1117;color:#FAFAFA;}
@@ -31,14 +24,15 @@ h1,h2,h3,h4,h5{color:#E0E0E0;}
 </style>
 """, unsafe_allow_html=True)
 
+
 # -----------------------------
-# 🔍 Model Loader
+# 🧩 Safe Model Loader
 # -----------------------------
 @st.cache_resource
 def load_model(target):
     models = {
         "Anxiety": "final_anxiety_model.joblib",
-        "Stress": "final_stress_model.joblib",  # ✅ updated
+        "Stress": "final_stress_model.joblib",
         "Depression": "best_model_Depression_Label_SVM.joblib"
     }
     encoders = {
@@ -47,23 +41,27 @@ def load_model(target):
         "Depression": "final_depression_encoder (1).joblib"
     }
 
-    model_path = models.get(target)
-    encoder_path = encoders.get(target)
+    m_path = models[target]
+    e_path = encoders[target]
 
-    # Debug printout to confirm existence
-    st.sidebar.markdown(f"**🧩 Model Path:** `{model_path}`")
-    st.sidebar.markdown(f"**🎯 Encoder Path:** `{encoder_path}`")
-
-    if not os.path.exists(model_path):
-        st.error(f"❌ Model file missing: {model_path}")
+    if not os.path.exists(m_path):
+        st.error(f"❌ Model not found: {m_path}")
         return None, None
-    if not os.path.exists(encoder_path):
-        st.warning(f"⚠️ Encoder missing for {target}. Predictions will still work but labels won't decode.")
-        model = joblib.load(model_path)
-        return model, None
 
-    model = joblib.load(model_path)
-    encoder = joblib.load(encoder_path)
+    model = joblib.load(m_path)
+    encoder = None
+    if os.path.exists(e_path):
+        try:
+            enc = joblib.load(e_path)
+            # check if encoder has classes
+            if hasattr(enc, "classes_") and len(enc.classes_) > 0:
+                encoder = enc
+            else:
+                st.warning(f"⚠️ Encoder for {target} is empty, will use numeric mapping instead.")
+        except Exception:
+            st.warning(f"⚠️ Failed to load encoder for {target}, fallback mode enabled.")
+    else:
+        st.warning(f"⚠️ No encoder file found for {target}, fallback mode enabled.")
     return model, encoder
 
 
@@ -75,9 +73,19 @@ def risk_tier_map(label):
         "Severe": "Critical"
     }
     for key, val in mapping.items():
-        if key.lower() in label.lower():
+        if key.lower() in str(label).lower():
             return val
     return "Unknown"
+
+
+def numeric_to_label(value, target):
+    """Fallback labels when encoder is missing"""
+    if target == "Anxiety":
+        return ["Minimal Anxiety", "Mild Anxiety", "Moderate Anxiety", "Severe Anxiety"][int(value) % 4]
+    elif target == "Stress":
+        return ["Minimal Stress", "Mild Stress", "Moderate Stress", "Severe Stress"][int(value) % 4]
+    else:
+        return ["Minimal Depression", "Mild Depression", "Moderate Depression", "Severe Depression"][int(value) % 4]
 
 
 def save_prediction_log(row):
@@ -89,7 +97,7 @@ def save_prediction_log(row):
 
 
 # -----------------------------
-# 🧭 Sidebar Navigation
+# 🧭 Navigation
 # -----------------------------
 st.sidebar.title("🧭 Navigation")
 page = st.sidebar.radio("", ["🧩 Prediction", "📊 Dashboard"])
@@ -112,8 +120,9 @@ if page == "🧩 Prediction":
     st.markdown(f"### 🧾 {target} Screening Form")
     st.info("Rate each statement from 1 (Not at all) to 5 (Nearly every day).")
 
-    if target == "Anxiety":
-        questions = [
+    # Questions by type
+    q = {
+        "Anxiety": [
             "Feeling nervous, anxious, or on edge",
             "Not being able to stop or control worrying",
             "Worrying too much about different things",
@@ -121,9 +130,8 @@ if page == "🧩 Prediction":
             "Being so restless that it is hard to sit still",
             "Becoming easily annoyed or irritable",
             "Feeling afraid as if something awful might happen"
-        ]
-    elif target == "Stress":
-        questions = [
+        ],
+        "Stress": [
             "Upset because of unexpected events",
             "Unable to control important things in life",
             "Felt nervous and stressed",
@@ -134,9 +142,8 @@ if page == "🧩 Prediction":
             "Felt on top of things",
             "Angry because things were out of control",
             "Felt difficulties piling up too high"
-        ]
-    else:
-        questions = [
+        ],
+        "Depression": [
             "Little interest or pleasure in doing things",
             "Feeling down, depressed, or hopeless",
             "Trouble falling or staying asleep, or sleeping too much",
@@ -147,14 +154,21 @@ if page == "🧩 Prediction":
             "Moving/speaking slowly or restlessness",
             "Thoughts of self-harm or death"
         ]
+    }[target]
 
-    responses = [st.slider(q, 1, 5, 3) for q in questions]
+    answers = [st.slider(q_i, 1, 5, 3) for q_i in q]
 
     if st.button("🔍 Predict Mental Health Status"):
         try:
-            df = pd.DataFrame([responses])
+            df = pd.DataFrame([answers])
             pred = model.predict(df)[0]
-            decoded = encoder.inverse_transform([pred])[0] if encoder else str(pred)
+
+            # 🔧 Fix for missing encoders
+            if encoder is not None:
+                decoded = encoder.inverse_transform([pred])[0]
+            else:
+                decoded = numeric_to_label(pred, target)
+
             risk = risk_tier_map(decoded)
 
             st.success(f"🎯 Predicted: **{decoded}**")
@@ -165,7 +179,7 @@ if page == "🧩 Prediction":
                 "Moderate": "Exercise • Journaling • Healthy diet",
                 "High": "Seek counseling • Reduce workload • Mindfulness",
                 "Critical": "Consult professional immediately • Support network"
-            }.get(risk, "Monitor mental state regularly.")
+            }.get(risk, "Monitor your mental state regularly.")
             st.markdown(f"**Suggested Actions:** {actions}")
 
             save_prediction_log({
@@ -178,14 +192,15 @@ if page == "🧩 Prediction":
         except Exception as e:
             st.error(f"Prediction failed: {e}")
 
+
 # -----------------------------
-# 📊 Dashboard
+# 📊 Dashboard Page
 # -----------------------------
 else:
     st.title("📊 Mental Health Dashboard")
 
     if not os.path.exists("prediction_log.csv"):
-        st.warning("No predictions yet. Perform some first.")
+        st.warning("No predictions yet. Make some first.")
         st.stop()
 
     df = pd.read_csv("prediction_log.csv")
@@ -194,17 +209,17 @@ else:
     st.subheader("📈 Summary Statistics")
     total = len(df)
     tiers = df["risk_tier"].value_counts(normalize=True).mul(100)
-    for tier in ["Low", "Moderate", "High", "Critical"]:
+
+    for tier, color in zip(["Low", "Moderate", "High", "Critical"], ["#00FF88", "#FFFF00", "#FFA500", "#FF4444"]):
         val = float(tiers.get(tier, 0))
+        st.markdown(f"<div style='color:{color};font-weight:600'>{tier}: {val:.1f}%</div>", unsafe_allow_html=True)
         st.progress(int(val))
-        st.markdown(f"**{tier}: {val:.1f}%**")
 
     df["datetime"] = pd.to_datetime(df["datetime"])
     trend = df.groupby(df["datetime"].dt.date).size().reset_index(name="Predictions")
     st.altair_chart(
         alt.Chart(trend).mark_line(point=True, color="#00FFAA").encode(
-            x="datetime:T", y="Predictions:Q"),
-        use_container_width=True
+            x="datetime:T", y="Predictions:Q"), use_container_width=True
     )
 
     dist = df["risk_tier"].value_counts().reset_index()
@@ -213,12 +228,11 @@ else:
         alt.Chart(dist).mark_bar().encode(
             x=alt.X("Risk Tier:N", sort="-y"),
             y="Count:Q",
-            color="Risk Tier:N"),
-        use_container_width=True
+            color="Risk Tier:N"), use_container_width=True
     )
 
     st.download_button(
-        "⬇️ Download Prediction Log",
+        "⬇️ Download Prediction History",
         data=df.to_csv(index=False),
         file_name="prediction_log.csv",
         mime="text/csv"
