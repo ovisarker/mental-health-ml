@@ -34,14 +34,14 @@ h1,h2,h3,h4,h5{color:#E0E0E0;}
 @st.cache_resource
 def load_model(target):
     models = {
-        "Anxiety": "final_anxiety_model.joblib",
-        "Stress": "final_stress_model.joblib",
-        "Depression": "best_model_Depression_Label_SVM.joblib"
+        "Anxiety": "best_model_Anxiety_Label_Logistic_Regression.joblib",
+        "Stress": "best_model_Stress_Label_Logistic_Regression.joblib",
+        "Depression": "best_model_Depression_Label_CatBoost.joblib"
     }
     encoders = {
         "Anxiety": "final_anxiety_encoder.joblib",
         "Stress": "final_stress_encoder.joblib",
-        "Depression": "final_depression_encoder (1).joblib"
+        "Depression": "final_depression_encoder.joblib"
     }
 
     m_path = models[target]
