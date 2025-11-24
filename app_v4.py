@@ -66,7 +66,6 @@ def load_model(target):
 # -----------------------------
 def numeric_to_label(value, target):
     """Fallback labels when encoder is missing or unseen label is encountered"""
-    # Handle unseen label (e.g., label 3)
     if value == 3:
         return "Moderate Stress"  # Default label for unseen stress levels
     
@@ -111,6 +110,16 @@ page = st.sidebar.radio("", ["🧩 Prediction", "📊 Dashboard"])
 # -----------------------------
 # 🧩 Prediction Page
 # -----------------------------
+def align_features(df, model):
+    """Align input dataframe with the features expected by the model."""
+    expected_features = getattr(model, "feature_names_in_", None)
+    if expected_features is not None:
+        for col in expected_features:
+            if col not in df.columns:
+                df[col] = 0  # Use a neutral value like 0 if the feature is missing
+        df = df[expected_features]
+    return df
+
 if page == "🧩 Prediction":
     st.title("🧠 AI-based Mental Health Detection & Support System")
     st.caption("Developed for Thesis & Real-world Use | 2025")
@@ -166,12 +175,16 @@ if page == "🧩 Prediction":
 
     if st.button("🔍 Predict Mental Health Status"):
         try:
+            # Create dataframe for model input
             df = pd.DataFrame([responses])
 
-            # Ensure correct shape (flatten if needed)
-            pred = model.predict(df.values.flatten())[0]
+            # Align features with the model's expectations
+            df = align_features(df, model)
 
-            # 🔧 Safe decoder fallback
+            # Predict the result
+            pred = model.predict(df)[0]
+
+            # Decode prediction
             if encoder is not None:
                 decoded = encoder.inverse_transform([pred])[0]
             else:
@@ -190,6 +203,7 @@ if page == "🧩 Prediction":
             }.get(risk, "Monitor your mental health regularly.")
             st.markdown(f"**Suggested Actions:** {actions}")
 
+            # Save prediction log
             save_prediction_log({
                 "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "target": target,
