@@ -120,11 +120,35 @@ def numeric_to_label(value: float, target: str) -> str:
 def fallback_label_from_responses(responses: list[float], target: str) -> str:
     """Compute a severity label purely from the survey responses.
 
-    This heuristic uses the mean of the provided responses to assign a label
-    without relying on any machine‑learning model. The thresholds were chosen
-    heuristically: averages below 1.5 indicate minimal severity, averages
-    between 1.5 and 2.5 indicate mild severity, between 2.5 and 3.5 moderate,
-    and above 3.5 severe.
+    Rather than relying on an average score (which could produce similar
+    predictions across different inputs), this function uses well‑known
+    screening thresholds for each condition. Each survey employs a distinct
+    scoring algorithm:
+
+    * **Anxiety (GAD‑7)** — 7 questions originally scored 0–3. Responses
+      collected on a 1–5 scale are rescaled to 0–3 using a linear mapping.
+      The total score (0–21) determines severity:
+
+        - 0–4: Minimal Anxiety
+        - 5–9: Mild Anxiety
+        - 10–14: Moderate Anxiety
+        - 15–21: Severe Anxiety
+
+    * **Stress (PSS‑10)** — 10 questions scored 0–4. Our sliders range
+      1–5; subtracting 1 yields the original scale. The sum (0–40) is
+      categorised as:
+
+        - 0–13: Minimal Stress
+        - 14–26: Moderate Stress
+        - 27–40: Severe Stress
+
+    * **Depression (PHQ‑9)** — 9 questions scored 0–3. Responses on a
+      1–5 scale are linearly mapped to 0–3. The total (0–27) maps to:
+
+        - 0–4: Minimal Depression
+        - 5–9: Mild Depression
+        - 10–14: Moderate Depression
+        - 15–27: Severe Depression
 
     Parameters
     ----------
@@ -136,19 +160,38 @@ def fallback_label_from_responses(responses: list[float], target: str) -> str:
     Returns
     -------
     str
-        A descriptive severity label based on the average response.
+        A descriptive severity label based on the rescaled total score.
     """
-    avg = float(np.mean(responses))
-    if avg < 1.5:
-        level = "Minimal"
-    elif avg < 2.5:
-        level = "Mild"
-    elif avg < 3.5:
-        level = "Moderate"
-    else:
-        level = "Severe"
-
-    return f"{level} {target}"
+    if target == "Anxiety":
+        # Rescale 1–5 responses to a 0–3 range: (resp‑1)/4*3
+        total = sum(((resp - 1) / 4.0) * 3.0 for resp in responses)
+        if total <= 4:
+            return "Minimal Anxiety"
+        elif total <= 9:
+            return "Mild Anxiety"
+        elif total <= 14:
+            return "Moderate Anxiety"
+        else:
+            return "Severe Anxiety"
+    elif target == "Stress":
+        # Convert 1–5 responses to 0–4 and sum
+        total = sum((resp - 1) for resp in responses)
+        if total <= 13:
+            return "Minimal Stress"
+        elif total <= 26:
+            return "Moderate Stress"
+        else:
+            return "Severe Stress"
+    else:  # Depression
+        total = sum(((resp - 1) / 4.0) * 3.0 for resp in responses)
+        if total <= 4:
+            return "Minimal Depression"
+        elif total <= 9:
+            return "Mild Depression"
+        elif total <= 14:
+            return "Moderate Depression"
+        else:
+            return "Severe Depression"
 
 
 def risk_tier_map(label: str) -> str:
@@ -230,20 +273,21 @@ def align_features(df: pd.DataFrame, model) -> pd.DataFrame:
 
 
 def safe_predict(model, encoder, responses: list[float], target: str) -> str:
-    """Perform a model prediction with fallbacks.
+    """Derive a severity label using a model if possible, otherwise score manually.
 
-    This helper attempts to predict a severity label using the provided model.
-    It handles common issues such as missing features, unseen labels and
-    runtime exceptions by falling back to a heuristic based on the responses.
+    The original implementation attempted to use a pre‑trained classifier,
+    filling in missing features and catching errors. In practice the
+    bundled models tend to produce constant predictions or fail due to
+    mismatched training data. To ensure the application always returns a
+    meaningful result, this function now prioritises a heuristic based on
+    established questionnaire scoring rules (see `fallback_label_from_responses`).
 
     Parameters
     ----------
     model : any or None
-        A trained classifier. If None, the fallback is used immediately.
+        A trained classifier. Currently ignored to favour heuristic scoring.
     encoder : any or None
-        A label encoder for converting numeric predictions to strings. If
-        provided, it is used to decode model outputs. Otherwise the numeric
-        label is mapped via `numeric_to_label()`.
+        A label encoder (unused).
     responses : list of float
         The raw survey responses.
     target : str
@@ -252,31 +296,11 @@ def safe_predict(model, encoder, responses: list[float], target: str) -> str:
     Returns
     -------
     str
-        The predicted descriptive label (e.g. "Mild Stress").
+        The predicted descriptive label.
     """
-    # If no model is loaded, immediately use fallback
-    if model is None:
-        return fallback_label_from_responses(responses, target)
-
-    # Prepare a DataFrame from responses
-    df = pd.DataFrame([responses])
-    # Attempt to align features if the model expects more features
-    try:
-        df_aligned = align_features(df, model)
-        # Attempt prediction
-        pred_val = model.predict(df_aligned)[0]
-        # Decode using the encoder if available
-        if encoder is not None:
-            try:
-                return encoder.inverse_transform([pred_val])[0]
-            except Exception:
-                # If decoding fails due to unseen label, use numeric fallback
-                return numeric_to_label(pred_val, target)
-        # No encoder: map numeric prediction directly
-        return numeric_to_label(pred_val, target)
-    except Exception:
-        # For any error, fall back to heuristic label
-        return fallback_label_from_responses(responses, target)
+    # Always use the rule‑based fallback to provide dynamic and consistent
+    # predictions regardless of the underlying model state.
+    return fallback_label_from_responses(responses, target)
 
 
 # -----------------------------------------------------------------------------
