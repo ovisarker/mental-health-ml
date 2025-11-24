@@ -66,6 +66,7 @@ def load_model(target):
 # -----------------------------
 def numeric_to_label(value, target):
     """Fallback labels when encoder is missing or unseen label is encountered"""
+    # Handle unseen label (e.g., label 3)
     if value == 3:
         return "Moderate Stress"  # Default label for unseen stress levels
     
@@ -170,7 +171,7 @@ if page == "🧩 Prediction":
         ]
     }[target]
 
-    # Ensure sliders have valid labels and hide labels for accessibility if needed
+    # Display questions
     responses = [st.slider(q, 1, 5, 3, label_visibility="collapsed") for q in questions]
 
     if st.button("🔍 Predict Mental Health Status"):
