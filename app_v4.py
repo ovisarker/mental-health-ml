@@ -1,8 +1,3 @@
-# ==========================================
-# 🧠 AI-based Mental Health Detection & Support System (v4)
-# Stable & Deployment-Ready Version | 2025
-# ==========================================
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -66,9 +61,15 @@ def load_model(target):
         st.warning(f"⚠️ Encoder missing for {target}, using fallback.")
     return model, encoder
 
-
+# -----------------------------
+# Updated Label Handling (Unseen Labels)
+# -----------------------------
 def numeric_to_label(value, target):
-    """Fallback labels when encoder is missing"""
+    """Fallback labels when encoder is missing or unseen label is encountered"""
+    # Handle unseen label (e.g., label 3)
+    if value == 3:
+        return "Moderate Stress"  # Default label for unseen stress levels
+    
     if target == "Anxiety":
         return ["Minimal Anxiety", "Mild Anxiety", "Moderate Anxiety", "Severe Anxiety"][int(value) % 4]
     elif target == "Stress":
@@ -76,7 +77,9 @@ def numeric_to_label(value, target):
     else:
         return ["Minimal Depression", "Mild Depression", "Moderate Depression", "Severe Depression"][int(value) % 4]
 
-
+# -----------------------------
+# Risk Tier Mapping
+# -----------------------------
 def risk_tier_map(label):
     mapping = {
         "Minimal": "Low",
@@ -89,14 +92,15 @@ def risk_tier_map(label):
             return val
     return "Unknown"
 
-
+# -----------------------------
+# Save Prediction Log
+# -----------------------------
 def save_prediction_log(row):
     df = pd.DataFrame([row])
     if os.path.exists("prediction_log.csv"):
         df.to_csv("prediction_log.csv", mode='a', header=False, index=False)
     else:
         df.to_csv("prediction_log.csv", index=False)
-
 
 # -----------------------------
 # 🧭 Sidebar Navigation
@@ -201,7 +205,6 @@ if page == "🧩 Prediction":
 
         except Exception as e:
             st.error(f"Prediction failed: {e}")
-
 
 # -----------------------------
 # 📊 Dashboard Page
