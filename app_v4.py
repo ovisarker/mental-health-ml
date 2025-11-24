@@ -62,11 +62,11 @@ def load_model(target):
     return model, encoder
 
 # -----------------------------
+# -----------------------------
 # Updated Label Handling (Unseen Labels)
 # -----------------------------
 def numeric_to_label(value, target):
     """Fallback labels when encoder is missing or unseen label is encountered"""
-    # Handle unseen label (e.g., label 3)
     if value == 3:
         return "Moderate Stress"  # Default label for unseen stress levels
     
@@ -76,37 +76,6 @@ def numeric_to_label(value, target):
         return ["Minimal Stress", "Mild Stress", "Moderate Stress", "Severe Stress"][int(value) % 4]
     else:
         return ["Minimal Depression", "Mild Depression", "Moderate Depression", "Severe Depression"][int(value) % 4]
-
-# -----------------------------
-# Risk Tier Mapping
-# -----------------------------
-def risk_tier_map(label):
-    mapping = {
-        "Minimal": "Low",
-        "Mild": "Moderate",
-        "Moderate": "High",
-        "Severe": "Critical"
-    }
-    for key, val in mapping.items():
-        if key.lower() in str(label).lower():
-            return val
-    return "Unknown"
-
-# -----------------------------
-# Save Prediction Log
-# -----------------------------
-def save_prediction_log(row):
-    df = pd.DataFrame([row])
-    if os.path.exists("prediction_log.csv"):
-        df.to_csv("prediction_log.csv", mode='a', header=False, index=False)
-    else:
-        df.to_csv("prediction_log.csv", index=False)
-
-# -----------------------------
-# 🧭 Sidebar Navigation
-# -----------------------------
-st.sidebar.title("🧭 Navigation")
-page = st.sidebar.radio("", ["🧩 Prediction", "📊 Dashboard"])
 
 # -----------------------------
 # 🧩 Prediction Page
@@ -161,21 +130,15 @@ if page == "🧩 Prediction":
         ]
     }[target]
 
-    responses = [st.slider(q, 1, 5, 3) for q in questions]
+    # Ensure sliders have valid labels
+    responses = [st.slider(q, 1, 5, 3, label_visibility="collapsed") for q in questions]
 
     if st.button("🔍 Predict Mental Health Status"):
         try:
             df = pd.DataFrame([responses])
 
-            # ✅ Fix missing features problem
-            expected_cols = getattr(model, "feature_names_in_", None)
-            if expected_cols is not None:
-                for col in expected_cols:
-                    if col not in df.columns:
-                        df[col] = 0  # neutral placeholder
-                df = df[expected_cols]
-
-            pred = model.predict(df)[0]
+            # Ensure correct shape (flatten if needed)
+            pred = model.predict(df.values.flatten())[0]
 
             # 🔧 Safe decoder fallback
             if encoder is not None:
