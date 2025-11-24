@@ -66,6 +66,7 @@ def load_model(target):
 # -----------------------------
 def numeric_to_label(value, target):
     """Fallback labels when encoder is missing or unseen label is encountered"""
+    # Handle unseen label (e.g., label 3)
     if value == 3:
         return "Moderate Stress"  # Default label for unseen stress levels
     
