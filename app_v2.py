@@ -1,402 +1,287 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import joblib
-import os
-import altair as alt
 from datetime import datetime
+import altair as alt
+import os
 
 # ------------------------------------------------------------------
-# ⚙️ Page config + global styles
+# PAGE SETTINGS & GLOBAL STYLES
 # ------------------------------------------------------------------
 st.set_page_config(
-    page_title="AI-based Mental Health Detection System",
-    layout="wide",
+    page_title="AI Mental Health Assessment",
     page_icon="🧠",
+    layout="wide"
 )
 
-st.markdown(
-    """
+# Global Medical UI Styling
+st.markdown("""
 <style>
-body {background-color:#F4F7FB;color:#111827;}
-h1,h2,h3,h4,h5 {color:#111827;}
+body { background-color:#F4F7FB; color:#111827; }
+h1,h2,h3,h4,h5,h6 { color:#111827 !important; font-weight:700 !important; }
 
 .main-card {
-    background-color:#FFFFFF;
-    padding:24px 26px;
+    background:white;
+    padding:26px;
     border-radius:18px;
-    box-shadow:0 8px 18px rgba(15,23,42,0.08);
-    margin-bottom:18px;
+    box-shadow:0 8px 18px rgba(0,0,0,0.06);
+    margin-bottom:22px;
+}
+
+.section-card {
+    background:white;
+    padding:20px;
+    border-radius:14px;
+    box-shadow:0 4px 14px rgba(0,0,0,0.05);
 }
 
 .scale-card {
     background:#E8F2FF;
-    padding:14px 16px;
-    border-radius:14px;
     border:1px solid #C5DAFF;
-    font-size:0.88rem;
-}
-.scale-title {
-    font-weight:700;
-    margin-bottom:4px;
-}
-.scale-item {
-    margin:0;
-    padding:0;
-}
-
-.badge-pill {
-    display:inline-flex;
-    align-items:center;
-    padding:3px 10px;
-    border-radius:999px;
-    font-size:0.78rem;
-    font-weight:600;
-    background:#EEF2FF;
-    color:#4338CA;
-    margin-left:6px;
-}
-
-.result-badge {
-    padding:8px 14px;
-    border-radius:999px;
-    display:inline-flex;
-    align-items:center;
-    font-weight:600;
+    padding:16px;
+    border-radius:14px;
     font-size:0.9rem;
 }
-.result-low {background:#DCFCE7;color:#166534;}
-.result-mod {background:#FEF9C3;color:#854D0E;}
-.result-high {background:#FFEDD5;color:#9A3412;}
-.result-crit {background:#FEE2E2;color:#991B1B;}
+
+.badge {
+    padding:8px 14px;
+    border-radius:999px;
+    font-weight:600;
+    font-size:0.9rem;
+    display:inline-block;
+    margin-top:10px;
+}
+
+.badge-low { background:#DCFCE7; color:#166534; }
+.badge-mod { background:#FEF9C3; color:#854D0E; }
+.badge-high { background:#FFEDD5; color:#9A3412; }
+.badge-crit { background:#FEE2E2; color:#991B1B; }
+
+.lang-toggle {
+    background:#E0E7FF; padding:6px 12px; border-radius:8px;
+}
 </style>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
-# 🔧 Heuristic scoring (fallback / main logic)
+# MULTI-LANG LANGUAGE TOGGLE
 # ------------------------------------------------------------------
-def fallback_label_from_responses(responses, target: str) -> str:
-    """
-    Compute severity label based on standard clinical cut-offs.
+lang = st.sidebar.selectbox("Language:", ["English", "Bangla"])
 
-    Sliders are 1–5. We map them to 0–3 or 0–4 and sum.
-    """
+T = {
+    "English": {
+        "title": "AI-based Mental Health Assessment",
+        "choose": "What would you like to assess?",
+        "screening_form": "Screening Form",
+        "instructions": "Rate each statement from 1 (lowest) to 5 (highest).",
+        "predict": "🔍 Predict Mental Health Status",
+        "risk": "Risk Level",
+        "suggested": "Suggested Actions",
+        "disclaimer": "⚠ This tool does not replace professional diagnosis.",
+        "emergency": "If you feel unsafe or in crisis, contact emergency services immediately."
+    },
+    "Bangla": {
+        "title": "এআই-ভিত্তিক মানসিক স্বাস্থ্যের মূল্যায়ন",
+        "choose": "আপনি কোনটি মূল্যায়ন করতে চান?",
+        "screening_form": "স্ক্রিনিং ফর্ম",
+        "instructions": "প্রতিটি প্রশ্নের উত্তর দিন ১ (সবচেয়ে কম) থেকে ৫ (সবচেয়ে বেশি)।",
+        "predict": "🔍 মানসিক স্বাস্থ্য পূর্বাভাস দিন",
+        "risk": "ঝুঁকির স্তর",
+        "suggested": "প্রস্তাবিত পদক্ষেপ",
+        "disclaimer": "⚠ এই টুল পেশাদার মানসিক স্বাস্থ্য নির্ণয়ের বিকল্প নয়।",
+        "emergency": "আপনি যদি ঝুঁকিতে অনুভব করেন, জরুরি পরিষেবার সাথে যোগাযোগ করুন।"
+    }
+}[lang]
 
-    # Anxiety (GAD-7 style: 7 items, each 0–3, total 0–21)
+# ------------------------------------------------------------------
+# CLINICAL SCORING LOGIC
+# ------------------------------------------------------------------
+def score_responses(values, target):
+    """Return severity label based on standardized clinical scoring."""
+
+    # GAD-7 (Anxiety)
     if target == "Anxiety":
-        scaled = [max(0, min(3, v - 1)) for v in responses]  # 0–3
+        scaled = [v-1 for v in values]  # 0–3
         total = sum(scaled)
-        if total <= 4:
-            level = "Minimal"
-        elif total <= 9:
-            level = "Mild"
-        elif total <= 14:
-            level = "Moderate"
-        else:
-            level = "Severe"
-        return f"{level} Anxiety"
+        if total <= 4: lvl = "Minimal"
+        elif total <= 9: lvl = "Mild"
+        elif total <= 14: lvl = "Moderate"
+        else: lvl = "Severe"
+        return f"{lvl} Anxiety"
 
-    # Depression (PHQ-9 style: 9 items, each 0–3, total 0–27)
+    # PHQ-9 (Depression)
     if target == "Depression":
-        scaled = [max(0, min(3, v - 1)) for v in responses]
-        total = sum(scaled)
-        if total <= 4:
-            level = "Minimal"
-        elif total <= 9:
-            level = "Mild"
-        elif total <= 14:
-            level = "Moderate"
-        else:
-            level = "Severe"
-        return f"{level} Depression"
+        scaled = [v-1 for v in values]
+        total = sum(scaled)  # 0–27
+        if total <= 4: lvl = "Minimal"
+        elif total <= 9: lvl = "Mild"
+        elif total <= 14: lvl = "Moderate"
+        else: lvl = "Severe"
+        return f"{lvl} Depression"
 
-    # Stress (PSS-10 style: 10 items, each 0–4, total 0–40)
-    # Here our sliders are already 1–5, so map to 0–4
-    scaled = [max(0, min(4, v - 1)) for v in responses]
-    total = sum(scaled)
-    if total <= 13:
-        level = "Minimal"
-    elif total <= 26:
-        level = "Moderate"
-    else:
-        level = "Severe"
-    return f"{level} Stress"
+    # PSS-10 (Stress)
+    scaled = [v-1 for v in values]  # 0–4
+    total = sum(scaled)            # 0–40
+    if total <= 13: lvl = "Minimal"
+    elif total <= 26: lvl = "Moderate"
+    else: lvl = "Severe"
+    return f"{lvl} Stress"
 
-
-def risk_tier_map(label: str) -> str:
-    """Map severity label to risk tier."""
-    lower = label.lower()
-    if "minimal" in lower:
-        return "Low"
-    if "mild" in lower:
-        return "Moderate"
-    if "moderate" in lower:
-        return "High"
-    if "severe" in lower:
-        return "Critical"
+def map_risk(label):
+    ll = label.lower()
+    if "minimal" in ll: return "Low"
+    if "mild" in ll: return "Moderate"
+    if "moderate" in ll: return "High"
+    if "severe" in ll: return "Critical"
     return "Unknown"
 
+# ------------------------------------------------------------------
+# QUESTIONS
+# ------------------------------------------------------------------
+QUESTIONS = {
+    "Anxiety": [
+        "Feeling nervous, anxious, or on edge",
+        "Not being able to stop or control worrying",
+        "Worrying too much about different things",
+        "Trouble relaxing",
+        "Being so restless that it is hard to sit still",
+        "Becoming easily annoyed or irritable",
+        "Feeling afraid as if something awful might happen",
+    ],
+    "Stress": [
+        "Upset because of unexpected events",
+        "Unable to control important things in life",
+        "Felt nervous and stressed",
+        "Confident about handling problems",
+        "Things going your way",
+        "Could not cope with all the things you had to do",
+        "Able to control irritations",
+        "Felt on top of things",
+        "Angry because things were out of control",
+        "Felt difficulties piling up too high",
+    ],
+    "Depression": [
+        "Little interest or pleasure in doing things",
+        "Feeling down, depressed, or hopeless",
+        "Trouble sleeping or sleeping too much",
+        "Feeling tired or having little energy",
+        "Poor appetite or overeating",
+        "Feeling bad about yourself or failure",
+        "Trouble concentrating",
+        "Moving/speaking slowly / restlessness",
+        "Thoughts of self-harm",
+    ],
+}
 
-def save_prediction_log(row: dict) -> None:
-    df = pd.DataFrame([row])
-    log_path = "prediction_log.csv"
-    if os.path.exists(log_path):
-        df.to_csv(log_path, mode="a", header=False, index=False)
-    else:
-        df.to_csv(log_path, index=False)
-
-
-def safe_predict(responses, target: str) -> str:
-    """
-    For now we use the clinically-inspired heuristic for all predictions.
-    If in future you want to plug in ML models again, you can modify here.
-    """
-    return fallback_label_from_responses(responses, target)
+# Scale meaning per target
+SCALE = {
+    "Anxiety": ["Not at all", "Several days", "Half the days", "Nearly every day", "Almost always"],
+    "Depression": ["Not at all", "Several days", "Half the days", "Nearly every day", "Almost always"],
+    "Stress": ["Never", "Almost never", "Sometimes", "Often", "Very often"]
+}
 
 # ------------------------------------------------------------------
-# 🧭 Sidebar
+# SIDEBAR NAV
 # ------------------------------------------------------------------
-st.sidebar.title("🧭 Navigation")
-page = st.sidebar.radio("Select a page", ["🧩 Prediction", "📊 Dashboard"])
+page = st.sidebar.radio("Navigate", ["🧩 Screening", "📊 Dashboard"])
 
 # ------------------------------------------------------------------
-# 🧩 Prediction Page (with nicer layout)
+# SCREENING PAGE
 # ------------------------------------------------------------------
-if page == "🧩 Prediction":
+if page == "🧩 Screening":
     st.markdown("<div class='main-card'>", unsafe_allow_html=True)
 
-    st.subheader("🧠 AI-based Mental Health Detection & Support System")
-    st.caption("Developed for thesis & real-world use | Uses clinically inspired scoring")
+    st.header(T["title"])
+    st.write(f"**{T['disclaimer']}**")
+    st.write(f"🚨 *{T['emergency']}*")
 
-    target = st.selectbox("What would you like to screen for?", ["Anxiety", "Stress", "Depression"])
+    target = st.selectbox(T["choose"], ["Anxiety", "Stress", "Depression"])
 
-    # Question sets
-    question_sets = {
-        "Anxiety": [
-            "Feeling nervous, anxious, or on edge",
-            "Not being able to stop or control worrying",
-            "Worrying too much about different things",
-            "Trouble relaxing",
-            "Being so restless that it is hard to sit still",
-            "Becoming easily annoyed or irritable",
-            "Feeling afraid as if something awful might happen",
-        ],
-        "Stress": [
-            "Upset because of unexpected events",
-            "Unable to control important things in life",
-            "Felt nervous and stressed",
-            "Confident about handling problems",
-            "Things going your way",
-            "Could not cope with all the things you had to do",
-            "Able to control irritations in your life",
-            "Felt on top of things",
-            "Angry because things were out of control",
-            "Felt difficulties piling up too high",
-        ],
-        "Depression": [
-            "Little interest or pleasure in doing things",
-            "Feeling down, depressed, or hopeless",
-            "Trouble falling or staying asleep, or sleeping too much",
-            "Feeling tired or having little energy",
-            "Poor appetite or overeating",
-            "Feeling bad about yourself or feeling like a failure",
-            "Trouble concentrating on things",
-            "Moving/speaking slowly or restlessness",
-            "Thoughts of self-harm or death",
-        ],
-    }
+    st.subheader(f"🧾 {target} {T['screening_form']}")
 
-    # 1–5 meaning for each scale, shown in a corner card
-    scale_labels = {
-        "Anxiety": [
-            "1 – Not at all",
-            "2 – Several days",
-            "3 – More than half the days",
-            "4 – Nearly every day",
-            "5 – Almost every day",
-        ],
-        "Depression": [
-            "1 – Not at all",
-            "2 – Several days",
-            "3 – More than half the days",
-            "4 – Nearly every day",
-            "5 – Almost every day",
-        ],
-        "Stress": [
-            "1 – Never",
-            "2 – Almost never",
-            "3 – Sometimes",
-            "4 – Fairly often",
-            "5 – Very often",
-        ],
-    }
+    # layout row
+    left, right = st.columns([3,1])
 
-    st.markdown("### 🧾 {} Screening Form".format(target))
-    # top row: left = intro, right = 1–5 scale card
-    left_col, right_col = st.columns([3, 1], vertical_alignment="top")
+    # RIGHT COLUMN = SCALE CARD
+    with right:
+        st.markdown("<div class='scale-card'>", unsafe_allow_html=True)
+        st.markdown("### Scale Meaning (1–5)")
+        for i, s in enumerate(SCALE[target], 1):
+            st.write(f"**{i} — {s}**")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    with left_col:
-        st.info("Rate each statement from **1 (lowest)** to **5 (highest)** based on your experience over the last 2 weeks.")
-
-    with right_col:
-        items_html = "".join(
-            f"<li class='scale-item'>{txt}</li>" for txt in scale_labels[target]
-        )
-        st.markdown(
-            f"""
-            <div class="scale-card">
-              <div class="scale-title">
-                1–5 Response Scale
-                <span class="badge-pill">{target}</span>
-              </div>
-              <ul style="padding-left:18px;margin-top:6px;">
-                {items_html}
-              </ul>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    st.write("")  # small spacing
-
-    # Sliders in the left column (form area)
+    # LEFT COLUMN = QUESTIONS
     responses = []
-    with left_col:
-        for idx, question in enumerate(question_sets[target]):
-            slider_key = f"{target}_q{idx}"
-            val = st.slider(
-                label=question,
-                min_value=1,
-                max_value=5,
-                value=3,
-                key=slider_key,
+    with left:
+        for i, q in enumerate(QUESTIONS[target]):
+            responses.append(
+                st.slider(q, 1, 5, 3, key=f"{target}{i}")
             )
-            responses.append(val)
 
-    # Prediction button
-    if st.button("🔍 Predict Mental Health Status"):
-        label = safe_predict(responses, target)
-        risk = risk_tier_map(label)
+    if st.button(T["predict"]):
+        label = score_responses(responses, target)
+        risk = map_risk(label)
 
-        # choose badge class
-        if risk == "Low":
-            badge_class = "result-low"
-        elif risk == "Moderate":
-            badge_class = "result-mod"
-        elif risk == "High":
-            badge_class = "result-high"
-        elif risk == "Critical":
-            badge_class = "result-crit"
+        badge_class = {
+            "Low":"badge-low",
+            "Moderate":"badge-mod",
+            "High":"badge-high",
+            "Critical":"badge-crit"
+        }[risk]
+
+        st.markdown(f"<div class='badge {badge_class}'>🎯 {label}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='badge {badge_class}'>🩺 {T['risk']}: {risk}</div>", unsafe_allow_html=True)
+
+        sug = {
+            "Low":"Maintain a healthy routine and sleep schedule.",
+            "Moderate":"Practice mindfulness, journaling, social support.",
+            "High":"Reduce stress exposure and consult a professional.",
+            "Critical":"Seek immediate professional help and crisis support."
+        }[risk]
+
+        st.write(f"### {T['suggested']}: {sug}")
+
+        # save log
+        log_row = {
+            "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "target": target,
+            "label": label,
+            "risk": risk
+        }
+        df = pd.DataFrame([log_row])
+        if os.path.exists("log.csv"):
+            df.to_csv("log.csv", mode="a", header=False, index=False)
         else:
-            badge_class = "result-mod"
+            df.to_csv("log.csv", index=False)
 
-        st.markdown("---")
-
-        # Predicted label
-        st.markdown(
-            f"""
-            <div class="result-badge {badge_class}">
-                🎯 Predicted: {label}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        # Risk level
-        st.markdown(
-            f"""
-            <div style="margin-top:10px;" class="result-badge {badge_class}">
-                🩺 Risk Level: {risk}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        # Suggested actions
-        actions_text = {
-            "Low": "Maintain a healthy routine • Sleep 7–9 hours • Practice simple relaxation breathing.",
-            "Moderate": "Consider light exercise, journaling, talking with a trusted friend or counselor.",
-            "High": "Reduce workload where possible • Talk to a mental-health professional soon • Practice mindfulness.",
-            "Critical": "Strongly consider speaking with a licensed mental-health professional or helpline immediately • Lean on your support network.",
-        }.get(risk, "Monitor your mental health regularly and repeat this screening when needed.")
-
-        st.markdown(f"**Suggested Actions:** {actions_text}")
-
-        # Save log
-        save_prediction_log(
-            {
-                "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "target": target,
-                "predicted_label": label,
-                "risk_tier": risk,
-            }
-        )
-
-    st.markdown("</div>", unsafe_allow_html=True)  # end main-card
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
-# 📊 Dashboard Page
+# DASHBOARD
 # ------------------------------------------------------------------
 if page == "📊 Dashboard":
     st.markdown("<div class='main-card'>", unsafe_allow_html=True)
-    st.subheader("📊 Mental Health Analytics Dashboard")
+    st.header("📊 Analytics Dashboard")
 
-    log_path = "prediction_log.csv"
-    if not os.path.exists(log_path):
-        st.warning("No predictions have been made yet. Please perform a screening first.")
+    if not os.path.exists("log.csv"):
+        st.warning("No screening results yet.")
     else:
-        df = pd.read_csv(log_path)
-        st.dataframe(df.tail(10), use_container_width=True)
+        df = pd.read_csv("log.csv")
+        st.dataframe(df.tail(20))
 
-        st.markdown("### 📈 Risk Distribution Overview")
+        # Risk distribution
+        st.subheader("Risk Distribution")
+        tiers = df["risk"].value_counts()
 
-        tiers = df["risk_tier"].value_counts(normalize=True).mul(100)
-        colors = {
-            "Low": "#22C55E",
-            "Moderate": "#EAB308",
-            "High": "#F97316",
-            "Critical": "#EF4444",
-        }
-        for tier in ["Low", "Moderate", "High", "Critical"]:
-            val = float(tiers.get(tier, 0))
-            st.markdown(
-                f"<span style='font-weight:600;color:{colors[tier]}'>{tier}: {val:.1f}%</span>",
-                unsafe_allow_html=True,
-            )
-            st.progress(int(val))
+        chart = pd.DataFrame({
+            "Risk": tiers.index,
+            "Count": tiers.values
+        })
+        st.bar_chart(chart, x="Risk", y="Count")
 
         df["datetime"] = pd.to_datetime(df["datetime"])
-        trend = df.groupby(df["datetime"].dt.date).size().reset_index(name="Predictions")
-
-        st.markdown("### ⏱ Screenings over time")
-        st.altair_chart(
-            alt.Chart(trend).mark_line(point=True, color="#0EA5E9").encode(
-                x="datetime:T",
-                y="Predictions:Q",
-            ),
-            use_container_width=True,
-        )
-
-        dist = df["risk_tier"].value_counts().reset_index()
-        dist.columns = ["Risk Tier", "Count"]
-
-        st.markdown("### 🧪 Risk tier counts")
-        st.altair_chart(
-            alt.Chart(dist).mark_bar().encode(
-                x=alt.X("Risk Tier:N", sort="-y"),
-                y="Count:Q",
-                color="Risk Tier:N",
-            ),
-            use_container_width=True,
-        )
-
-        st.download_button(
-            "⬇️ Download Prediction Log",
-            data=df.to_csv(index=False),
-            file_name="prediction_log.csv",
-            mime="text/csv",
-        )
+        trend = df.groupby(df["datetime"].dt.date).size()
+        st.subheader("Screenings Over Time")
+        st.line_chart(trend)
 
     st.markdown("</div>", unsafe_allow_html=True)
