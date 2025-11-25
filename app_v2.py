@@ -1,9 +1,10 @@
 ################################################################################
-# AI-based Mental Health Assessment — v10 FINAL
+# AI-based Mental Health Assessment — FINAL v10
 # - English + Bangla
 # - GAD-7 / PHQ-9 / PSS-10 + extra scales (Sleep, Burnout, ADHD, PTSD, Anger)
-# - Live preview, user profile, dashboard, coach, mood journal
-# - Private mode, auto-reset CSV, text/PDF report (PDF optional via fpdf)
+# - Screening, Dashboard, Coach, Mood Journal, User Profile
+# - Safe CSV, private mode, optional PDF report
+# - Footer: Designed & Developed by Ovi Sarker
 ################################################################################
 
 import streamlit as st
@@ -92,6 +93,14 @@ h1, h2, h3, h4, h5, h6 { color:#111827 !important; font-weight:700 !important; }
     padding:16px;
     border:1px solid #DDD6FE;
 }
+
+.footer {
+    margin-top:30px;
+    padding:12px 0 4px 0;
+    font-size:0.85rem;
+    color:#6B7280;
+    text-align:center;
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -138,7 +147,6 @@ TEXT = {
         "instructions": "Rate each statement from 1 (lowest) to 5 (highest) based on the last 2 weeks.",
         "scale_title": "Scale Meaning (1–5)",
         "btn_predict": "🔍 Predict Mental Health Status",
-        "live_preview": "Live Score Preview",
         "risk_level": "Risk Level",
         "suggested_actions": "Suggested Actions",
         "disclaimer": "This tool does not replace professional diagnosis or treatment.",
@@ -180,7 +188,6 @@ TEXT = {
         "instructions": "গত ২ সপ্তাহের ভিত্তিতে প্রতিটি প্রশ্নের জন্য ১ (সবচেয়ে কম) থেকে ৫ (সবচেয়ে বেশি) নির্বাচন করুন।",
         "scale_title": "স্কেল মানে (১–৫)",
         "btn_predict": "🔍 মানসিক স্বাস্থ্যের পূর্বাভাস দেখুন",
-        "live_preview": "লাইভ স্কোর প্রিভিউ",
         "risk_level": "ঝুঁকির স্তর",
         "suggested_actions": "পরামর্শকৃত পদক্ষেপ",
         "disclaimer": "এই টুল কখনোই পেশাদার ডাক্তারের পরামর্শ বা চিকিৎসার বিকল্প নয়।",
@@ -367,7 +374,7 @@ QUESTIONS_BN = {
         "বসে থাকতে কি অস্থির লাগে বা ফিজেট করেন?",
         "সব সময় যেন কাজের মধ্যে থাকতে হয় এমন অনুভূতি হয়?",
         "খুব বেশি কথা বলে ফেলেন কি?",
-        "অন্যের কথা কেটে কথা বলা বা হস্তক্ষেপ করে ফেলেন কি?",
+        "অন্যের কথা कাটা দিয়ে কথা বলা বা হস্তক্ষেপ করে ফেলেন কি?",
     ],
     "PTSD": [
         "কোনো স্ট্রেসফুল ঘটনার স্মৃতি কি আপনাকে বিরক্ত করে?",
@@ -406,29 +413,11 @@ SCALE_EN = {
         "Nearly every day",
         "Almost always",
     ],
-    "Stress": [
-        "Never",
-        "Almost never",
-        "Sometimes",
-        "Fairly often",
-        "Very often",
-    ],
-    "Sleep": [
-        "No problem",
-        "Mild problem",
-        "Somewhat",
-        "Quite a bit",
-        "Very severe",
-    ],
+    "Stress": ["Never", "Almost never", "Sometimes", "Fairly often", "Very often"],
+    "Sleep": ["No problem", "Mild problem", "Somewhat", "Quite a bit", "Very severe"],
     "Burnout": ["Never", "Rarely", "Sometimes", "Often", "Very often"],
     "ADHD": ["Never", "Rarely", "Sometimes", "Often", "Very often"],
-    "PTSD": [
-        "Not at all",
-        "A little bit",
-        "Moderately",
-        "Quite a bit",
-        "Extremely",
-    ],
+    "PTSD": ["Not at all", "A little bit", "Moderately", "Quite a bit", "Extremely"],
     "Anger": ["Never", "Rarely", "Sometimes", "Often", "Very often"],
 }
 
@@ -447,29 +436,11 @@ SCALE_BN = {
         "প্রায় প্রতিদিন",
         "প্রায় সব সময়",
     ],
-    "Stress": [
-        "কখনোই না",
-        "খুব কম",
-        "মাঝে মাঝে",
-        "প্রায়ই",
-        "প্রায় সব সময়",
-    ],
-    "Sleep": [
-        "কোন সমস্যা নেই",
-        "হালকা সমস্যা",
-        "মাঝারি সমস্যা",
-        "অনেক বেশি",
-        "খুব তীব্র",
-    ],
+    "Stress": ["কখনোই না", "খুব কম", "মাঝে মাঝে", "প্রায়ই", "প্রায় সব সময়"],
+    "Sleep": ["কোন সমস্যা নেই", "হালকা সমস্যা", "মাঝারি সমস্যা", "অনেক বেশি", "খুব তীব্র"],
     "Burnout": ["কখনোই না", "কম", "মাঝে মাঝে", "প্রায়ই", "খুব প্রায়ই"],
     "ADHD": ["কখনোই না", "কম", "মাঝে মাঝে", "প্রায়ই", "খুব প্রায়ই"],
-    "PTSD": [
-        "একদমই না",
-        "সামান্য",
-        "মাঝারি",
-        "অনেক বেশি",
-        "অত্যন্ত বেশি",
-    ],
+    "PTSD": ["একদমই না", "সামান্য", "মাঝারি", "অনেক বেশি", "অত্যন্ত বেশি"],
     "Anger": ["কখনোই না", "কম", "মাঝে মাঝে", "প্রায়ই", "খুব প্রায়ই"],
 }
 
@@ -484,10 +455,9 @@ def score_and_risk(values, target):
         risk_tier ("Low/Moderate/High/Critical"),
         total_score, max_score
     """
-
     if target == "Anxiety":
         scaled = [v - 1 for v in values]  # 0–3
-        total = sum(scaled)              # 0–21
+        total = sum(scaled)  # 0–21
         max_score = 3 * 7
         if total <= 4:
             level, risk = "Minimal", "Low"
@@ -501,7 +471,7 @@ def score_and_risk(values, target):
 
     if target == "Depression":
         scaled = [v - 1 for v in values]
-        total = sum(scaled)              # 0–27
+        total = sum(scaled)  # 0–27
         max_score = 3 * 9
         if total <= 4:
             level, risk = "Minimal", "Low"
@@ -515,7 +485,7 @@ def score_and_risk(values, target):
 
     if target == "Stress":
         scaled = [v - 1 for v in values]  # 0–4
-        total = sum(scaled)              # 0–40
+        total = sum(scaled)  # 0–40
         max_score = 4 * 10
         if total <= 13:
             level, risk = "Minimal", "Low"
@@ -525,12 +495,10 @@ def score_and_risk(values, target):
             level, risk = "Severe", "Critical"
         return f"{level} Stress", risk, total, max_score
 
-    # Generic scoring: more items, 0–4 each
+    # Generic scoring for other scales: 0–4 each
     scaled = [v - 1 for v in values]
     total = sum(scaled)
     max_score = 4 * len(values)
-
-    # simple thresholds as % of max
     pct = total / max_score if max_score else 0
     if pct <= 0.25:
         level, risk = "Minimal", "Low"
@@ -540,7 +508,6 @@ def score_and_risk(values, target):
         level, risk = "Moderate", "High"
     else:
         level, risk = "Severe", "Critical"
-
     return f"{level} {target}", risk, total, max_score
 
 
@@ -558,7 +525,13 @@ def risk_badge_class(risk):
 def save_profile(name, age_group):
     df_users = load_safe_csv(USER_PATH)
     new_row = pd.DataFrame(
-        [{"name": name, "age_group": age_group, "updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}]
+        [
+            {
+                "name": name,
+                "age_group": age_group,
+                "updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        ]
     )
     if df_users.empty:
         new_row.to_csv(USER_PATH, index=False)
@@ -616,7 +589,7 @@ def build_pdf_from_text(report_bytes: bytes):
     return pdf_str
 
 # ------------------------------------------------------------------
-# COACH REPLY (very simple rule-based)
+# COACH REPLY (simple rule-based)
 # ------------------------------------------------------------------
 def generate_coach_reply(severity_label: str, question: str, lang: str) -> str:
     q = (question or "").lower()
@@ -668,7 +641,6 @@ def generate_coach_reply(severity_label: str, question: str, lang: str) -> str:
 st.sidebar.markdown(f"### {TEXT['profile_title']}")
 
 last_name, last_age = get_last_profile()
-
 age_options = ["", "<18", "18-24", "25-34", "35-44", "45-59", "60+"]
 
 profile_name = st.sidebar.text_input(TEXT["profile_name"], value=last_name or "")
@@ -731,7 +703,7 @@ if page == TEXT["nav_screen"]:
             st.write(f"{i} — {label}")
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # LEFT: QUESTIONS + LIVE PREVIEW
+    # LEFT: QUESTIONS (no live preview)
     responses = []
     with left_col:
         qs = QUESTIONS_EN[target] if LANG == "English" else QUESTIONS_BN[target]
@@ -739,7 +711,7 @@ if page == TEXT["nav_screen"]:
             st.markdown(f"<div class='q-card'>{q_text}</div>", unsafe_allow_html=True)
             responses.append(
                 st.slider(
-                    label="",  # question is shown above
+                    label="",  # question text is shown above
                     min_value=1,
                     max_value=5,
                     value=3,
@@ -747,17 +719,7 @@ if page == TEXT["nav_screen"]:
                 )
             )
 
-        # Live preview after sliders
-        label_str, risk, total_score, max_score = score_and_risk(responses, target)
-        norm = total_score / max_score if max_score > 0 else 0
-
-        st.markdown(f"### {TEXT['live_preview']}")
-        st.write(f"**Score:** {total_score} / {max_score}")
-        st.progress(int(norm * 100))
-        st.write(f"**Severity:** {label_str}")
-        st.write(f"**{TEXT['risk_level']}:** {risk}")
-
-    # NOSTALGIC PREDICT BUTTON
+    # NOSTALGIC PREDICT BUTTON — ONLY FINAL RESULT SHOWN
     if st.button(TEXT["btn_predict"]):
         label_str, risk, total_score, max_score = score_and_risk(responses, target)
         badge_cls = risk_badge_class(risk)
@@ -768,7 +730,7 @@ if page == TEXT["nav_screen"]:
             unsafe_allow_html=True,
         )
 
-        # Simple explanation
+        # Explanation
         st.write("#### Explanation")
         if "Minimal" in label_str:
             st.write(
@@ -1004,8 +966,26 @@ else:  # Mood journal
         st.write(f"🙂 Mood rating: {last['mood_rating']}/5")
 
         txt = str(last["text"]).lower()
-        neg_words = ["tired", "sad", "alone", "stress", "worried", "anxious", "হতাশ", "একাকী", "টেনশন"]
-        pos_words = ["happy", "excited", "grateful", "relaxed", "উৎসাহী", "খুশি", "শান্ত"]
+        neg_words = [
+            "tired",
+            "sad",
+            "alone",
+            "stress",
+            "worried",
+            "anxious",
+            "হতাশ",
+            "একাকী",
+            "টেনশন",
+        ]
+        pos_words = [
+            "happy",
+            "excited",
+            "grateful",
+            "relaxed",
+            "উৎসাহী",
+            "খুশি",
+            "শান্ত",
+        ]
         neg_hits = sum(w in txt for w in neg_words)
         pos_hits = sum(w in txt for w in pos_words)
 
@@ -1026,3 +1006,17 @@ else:  # Mood journal
 
     st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
+
+# ------------------------------------------------------------------
+# GLOBAL FOOTER (ALL PAGES)
+# ------------------------------------------------------------------
+st.markdown(
+    """
+<div class='footer'>
+🧠 AI Mental Health Assessment System<br>
+Designed &amp; Developed by <strong>Ovi Sarker</strong><br>
+© 2025 All Rights Reserved
+</div>
+""",
+    unsafe_allow_html=True,
+)
