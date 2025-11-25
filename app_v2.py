@@ -1,8 +1,9 @@
 ################################################################################
-# AI-based Mental Health Assessment — FINAL v10
+# AI-based Mental Health Assessment — ULTRA v11
 # - English + Bangla
-# - GAD-7 / PHQ-9 / PSS-10 + extra scales (Sleep, Burnout, ADHD, PTSD, Anger)
-# - Screening, Dashboard, Coach, Mood Journal, User Profile
+# - GAD-7 / PHQ-9 / PSS-10 + Sleep, Burnout, ADHD, PTSD, Anger
+# - Screening, Dashboard, Coach, Mood Journal, Breathing
+# - Motivation card, streaks, AI-style insights, crisis detection, timelines
 # - Safe CSV, private mode, optional PDF report
 # - Footer: Designed & Developed by Ovi Sarker
 ################################################################################
@@ -10,9 +11,10 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, date, timedelta
 import altair as alt
 import os
+import random
 
 # Optional PDF support: safe import
 try:
@@ -94,6 +96,13 @@ h1, h2, h3, h4, h5, h6 { color:#111827 !important; font-weight:700 !important; }
     border:1px solid #DDD6FE;
 }
 
+.breath-card {
+    background:#FFF7ED;
+    border-radius:14px;
+    padding:16px;
+    border:1px solid #FED7AA;
+}
+
 .footer {
     margin-top:30px;
     padding:12px 0 4px 0;
@@ -139,6 +148,7 @@ TEXT = {
     "English": {
         "app_title": "AI-based Mental Health Assessment",
         "nav_screen": "🧩 Screening",
+        "nav_breath": "🫁 Breathing & Relaxation",
         "nav_dash": "📊 Dashboard",
         "nav_coach": "🧑‍⚕️ Coach",
         "nav_journal": "📓 Mood Journal",
@@ -156,7 +166,8 @@ TEXT = {
         "dash_last": "Recent Screening Results",
         "dash_risk_dist": "Risk Distribution",
         "dash_over_time": "Screenings Over Time",
-        "dash_pred": "Simple Mood Prediction (next screening)",
+        "dash_pred": "AI Mood Prediction (next screening)",
+        "dash_timeline": "Symptom Timeline by Scale",
         "profile_title": "User Profile",
         "profile_name": "Name (optional)",
         "profile_age": "Age group",
@@ -176,10 +187,14 @@ TEXT = {
         "journal_btn": "Save mood entry",
         "journal_saved": "Mood entry saved.",
         "journal_none": "No mood entries yet.",
+        "streak_title": "Daily Screening Streak",
+        "streak_none": "No streak yet — start by doing a screening today.",
+        "motiv_title": "Daily Mental Health Card",
     },
     "বাংলা (Bangla)": {
         "app_title": "এআই ভিত্তিক মানসিক স্বাস্থ্যের মূল্যায়ন",
         "nav_screen": "🧩 স্ক্রিনিং",
+        "nav_breath": "🫁 শ্বাস-প্রশ্বাস ও রিল্যাক্সেশন",
         "nav_dash": "📊 ড্যাশবোর্ড",
         "nav_coach": "🧑‍⚕️ কোচ",
         "nav_journal": "📓 মুড জার্নাল",
@@ -197,7 +212,8 @@ TEXT = {
         "dash_last": "সাম্প্রতিক স্ক্রিনিং ফলাফল",
         "dash_risk_dist": "ঝুঁকির মাত্রা বণ্টন",
         "dash_over_time": "সময়ের সাথে স্ক্রিনিং সংখ্যা",
-        "dash_pred": "সহজ মুড প্রেডিকশন (পরবর্তী স্ক্রিনিংয়ের পূর্বাভাস)",
+        "dash_pred": "এআই মুড প্রেডিকশন (পরবর্তী স্ক্রিনিংয়ের পূর্বাভাস)",
+        "dash_timeline": "স্কেল অনুযায়ী লক্ষণ পরিবর্তন (টাইমলাইন)",
         "profile_title": "ইউজার প্রোফাইল",
         "profile_name": "নাম (ইচ্ছামত)",
         "profile_age": "বয়সের গ্রুপ",
@@ -217,8 +233,31 @@ TEXT = {
         "journal_btn": "মুড এন্ট্রি সেভ করুন",
         "journal_saved": "মুড এন্ট্রি সেভ হয়েছে।",
         "journal_none": "এখনও কোনো মুড এন্ট্রি নেই।",
+        "streak_title": "দৈনিক স্ক্রিনিং স্ট্রিক",
+        "streak_none": "এখনও স্ট্রিক শুরু হয়নি — আজ একটি স্ক্রিনিং করুন।",
+        "motiv_title": "দৈনিক মানসিক স্বাস্থ্য কার্ড",
     },
 }[LANG]
+
+# ------------------------------------------------------------------
+# MOTIVATION CARDS
+# ------------------------------------------------------------------
+MOTIVATIONS_EN = [
+    "You don’t have to be perfect to deserve rest.",
+    "Small steps still move you forward.",
+    "Your feelings are valid, even if others don’t see them.",
+    "Taking care of yourself is a quiet form of courage.",
+    "You have survived 100% of your hardest days so far.",
+    "It’s okay to ask for help — it means you’re human.",
+]
+MOTIVATIONS_BN = [
+    "আপনাকে নিখুঁত হতে হবে না — বিশ্রাম আপনারও প্রাপ্য।",
+    "ছোট ছোট পদক্ষেপও এগিয়ে যাওয়া হিসেবেই গুনে।",
+    "আপনার অনুভূতিগুলো সত্যি, অন্য কেউ না বুঝলেও।",
+    "নিজের যত্ন নেওয়া এক ধরনের নীরব সাহস।",
+    "এর আগে আপনার সব কঠিন দিনই আপনি পার করেছেন।",
+    "সাহায্য চাওয়া দুর্বলতা নয় — এটা মানুষ হওয়ার প্রমাণ।",
+]
 
 # ------------------------------------------------------------------
 # QUESTIONS — ENGLISH + BANGLA
@@ -374,7 +413,7 @@ QUESTIONS_BN = {
         "বসে থাকতে কি অস্থির লাগে বা ফিজেট করেন?",
         "সব সময় যেন কাজের মধ্যে থাকতে হয় এমন অনুভূতি হয়?",
         "খুব বেশি কথা বলে ফেলেন কি?",
-        "অন্যের কথা कাটা দিয়ে কথা বলা বা হস্তক্ষেপ করে ফেলেন কি?",
+        "অন্যের কথা কেটে কথা বলা বা হস্তক্ষেপ করে ফেলেন কি?",
     ],
     "PTSD": [
         "কোনো স্ট্রেসফুল ঘটনার স্মৃতি কি আপনাকে বিরক্ত করে?",
@@ -520,6 +559,30 @@ def risk_badge_class(risk):
     }.get(risk, "badge-mod")
 
 # ------------------------------------------------------------------
+# STREAK CALCULATION
+# ------------------------------------------------------------------
+def compute_streak(df: pd.DataFrame) -> int:
+    """
+    Compute consecutive-day streak based on 'datetime' column.
+    """
+    if df.empty or "datetime" not in df.columns:
+        return 0
+    try:
+        df["datetime"] = pd.to_datetime(df["datetime"])
+        dates = sorted({d.date() for d in df["datetime"]})
+        if not dates:
+            return 0
+        today = max(dates)
+        streak = 0
+        current = today
+        while current in dates:
+            streak += 1
+            current = current - timedelta(days=1)
+        return streak
+    except Exception:
+        return 0
+
+# ------------------------------------------------------------------
 # USER PROFILE HELPERS
 # ------------------------------------------------------------------
 def save_profile(name, age_group):
@@ -636,7 +699,7 @@ def generate_coach_reply(severity_label: str, question: str, lang: str) -> str:
     return base + tail
 
 # ------------------------------------------------------------------
-# SIDEBAR: PROFILE + SETTINGS
+# SIDEBAR: PROFILE + SETTINGS + STREAK
 # ------------------------------------------------------------------
 st.sidebar.markdown(f"### {TEXT['profile_title']}")
 
@@ -666,12 +729,27 @@ if st.sidebar.button(TEXT["clear_data"]):
                 pass
     st.sidebar.success(TEXT["clear_done"])
 
+# Streak view
+st.sidebar.markdown(f"#### {TEXT['streak_title']}")
+df_log_sidebar = load_safe_csv(LOG_PATH)
+streak = compute_streak(df_log_sidebar)
+if streak <= 0:
+    st.sidebar.caption(TEXT["streak_none"])
+else:
+    st.sidebar.markdown(f"🔥 **{streak} day(s)** in a row")
+
 # ------------------------------------------------------------------
 # NAVIGATION
 # ------------------------------------------------------------------
 page = st.sidebar.radio(
     "Navigation",
-    [TEXT["nav_screen"], TEXT["nav_dash"], TEXT["nav_coach"], TEXT["nav_journal"]],
+    [
+        TEXT["nav_screen"],
+        TEXT["nav_breath"],
+        TEXT["nav_dash"],
+        TEXT["nav_coach"],
+        TEXT["nav_journal"],
+    ],
 )
 
 # ------------------------------------------------------------------
@@ -683,6 +761,14 @@ if page == TEXT["nav_screen"]:
     st.header(TEXT["app_title"])
     st.markdown(f"<p class='small-muted'>⚠ {TEXT['disclaimer']}</p>", unsafe_allow_html=True)
     st.markdown(f"<p class='small-muted'>🚨 {TEXT['emergency']}</p>", unsafe_allow_html=True)
+
+    # Daily motivation card
+    st.markdown(f"### {TEXT['motiv_title']}")
+    if LANG == "English":
+        mot = random.choice(MOTIVATIONS_EN)
+    else:
+        mot = random.choice(MOTIVATIONS_BN)
+    st.info(mot)
 
     target = st.selectbox(
         TEXT["choose_target"],
@@ -753,6 +839,49 @@ if page == TEXT["nav_screen"]:
                 "Please consider talking with a mental health professional as soon as you can."
             )
 
+        # AI-style insights
+        st.write("### 🔍 Insights about your pattern")
+        pct = (total_score / max_score) if max_score else 0
+        pct_disp = pct * 100
+        st.write(f"- Overall severity is approximately **{pct_disp:.1f}%** of the maximum for this scale.")
+
+        if target in ["Anxiety", "Stress"] and pct > 0.6:
+            st.write(
+                "- High levels on this scale often show up as difficulty relaxing, overthinking "
+                "and feeling 'on edge' during daily tasks."
+            )
+        if target == "Depression" and pct > 0.6:
+            st.write(
+                "- This pattern can be linked with low energy, loss of interest and harsh self-judgement. "
+                "It deserves kind attention and support."
+            )
+        if target == "Sleep" and pct > 0.6:
+            st.write(
+                "- Sleep difficulties can amplify both stress and mood symptoms. Improving sleep hygiene "
+                "often helps other scores slowly improve."
+            )
+        if target == "Burnout" and pct > 0.6:
+            st.write(
+                "- Burnout scores like this are common when responsibilities feel constant and rest "
+                "does not feel refreshing anymore."
+            )
+        if target == "PTSD" and pct > 0.6:
+            st.write(
+                "- Higher PTSD-like scores may reflect the impact of past stressful or traumatic events "
+                "that are still affecting your present life."
+            )
+        if target == "Anger" and pct > 0.6:
+            st.write(
+                "- Anger at this level can sometimes cover other emotions like hurt or fear. "
+                "Learning safe ways to express it can be very helpful."
+            )
+
+        if pct <= 0.4:
+            st.write(
+                "- Your current level is on the lower side. This is a good time to build and protect "
+                "healthy routines so things stay manageable."
+            )
+
         # Suggested actions
         st.write(f"### {TEXT['suggested_actions']}")
         suggestions = {
@@ -762,6 +891,17 @@ if page == TEXT["nav_screen"]:
             "Critical": "Please seek immediate support from a licensed mental health professional or crisis service.",
         }
         st.write(suggestions.get(risk, ""))
+
+        # Crisis safety message (for very high severity)
+        if risk == "Critical" or (
+            target in ["Depression", "PTSD"] and pct > 0.7
+        ):
+            st.error(
+                "⚠ Your responses suggest significant distress. This screening cannot diagnose you, "
+                "but it strongly suggests that talking to a mental health professional or doctor "
+                "would be very important. If you feel at risk of harming yourself or others, "
+                "please contact local emergency services or a trusted crisis helpline immediately."
+            )
 
         # Save to CSV if not in private mode
         if not private_mode:
@@ -814,6 +954,69 @@ if page == TEXT["nav_screen"]:
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
+# 🫁 BREATHING & RELAXATION PAGE
+# ------------------------------------------------------------------
+elif page == TEXT["nav_breath"]:
+    st.markdown("<div class='main-card'>", unsafe_allow_html=True)
+    st.header(TEXT["nav_breath"])
+
+    st.markdown("<div class='breath-card'>", unsafe_allow_html=True)
+    st.write(
+        "These simple breathing and grounding exercises are not a treatment, "
+        "but they can help your body and mind calm down in the moment."
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    tab1, tab2, tab3 = st.tabs(["Box Breathing", "4–7–8 Breathing", "5–4–3–2–1 Grounding"])
+
+    with tab1:
+        st.subheader("Box Breathing (4–4–4–4)")
+        st.write(
+            "1️⃣ Inhale through your nose for 4 seconds.\n"
+            "2️⃣ Hold your breath gently for 4 seconds.\n"
+            "3️⃣ Exhale slowly through your mouth for 4 seconds.\n"
+            "4️⃣ Pause for 4 seconds before the next breath.\n\n"
+            "Repeat this cycle 4–8 times."
+        )
+
+    with tab2:
+        st.subheader("4–7–8 Breathing")
+        st.write(
+            "1️⃣ Inhale quietly through your nose for 4 seconds.\n"
+            "2️⃣ Hold your breath for 7 seconds.\n"
+            "3️⃣ Exhale completely through your mouth for 8 seconds.\n\n"
+            "Repeat 4–6 times, especially helpful before sleep."
+        )
+
+    with tab3:
+        st.subheader("5–4–3–2–1 Grounding")
+        st.write(
+            "Look around you and slowly name:\n"
+            "• 5 things you can see\n"
+            "• 4 things you can feel (e.g., chair, clothes)\n"
+            "• 3 things you can hear\n"
+            "• 2 things you can smell\n"
+            "• 1 thing you can taste\n\n"
+            "This helps bring your mind back to the present moment."
+        )
+
+    st.markdown("---")
+    st.subheader("Optional: Guided Audio (add your own files)")
+    audio_files = {
+        "Calm breathing (short)": "calm_breathing_short.mp3",
+        "Sleep relaxation": "sleep_relaxation.mp3",
+    }
+
+    for label, filename in audio_files.items():
+        if os.path.exists(filename):
+            st.write(f"🎧 {label}")
+            st.audio(filename)
+        else:
+            st.caption(f"ℹ To use **{label}**, place an audio file named `{filename}` in the app folder.")
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ------------------------------------------------------------------
 # 📊 DASHBOARD PAGE
 # ------------------------------------------------------------------
 elif page == TEXT["nav_dash"]:
@@ -855,7 +1058,7 @@ elif page == TEXT["nav_dash"]:
         )
         st.altair_chart(trend_chart, use_container_width=True)
 
-        # Simple mood prediction (linear trend on % of max)
+        # AI Mood Prediction
         st.subheader(TEXT["dash_pred"])
         try:
             df_sorted = df.sort_values("datetime")
@@ -866,12 +1069,36 @@ elif page == TEXT["nav_dash"]:
                 next_x = len(x)
                 next_y = coeffs[0] * next_x + coeffs[1]
                 next_y = float(np.clip(next_y, 0, 100))
-                st.write(f"📈 Predicted next severity (overall): **{next_y:.1f}% of max**")
+                st.write(f"📈 Predicted next overall severity: **{next_y:.1f}% of max**")
                 st.progress(int(next_y))
             else:
                 st.write("Not enough screenings yet to predict trend.")
         except Exception:
             st.write("Could not compute prediction from existing data.")
+
+        # Symptom timeline by scale
+        st.subheader(TEXT["dash_timeline"])
+        targets = sorted(df["target"].unique())
+        chosen_t = st.selectbox("Choose scale", targets)
+        subset = df[df["target"] == chosen_t].copy()
+        if not subset.empty:
+            subset["datetime"] = pd.to_datetime(subset["datetime"])
+            subset["date"] = subset["datetime"].dt.date
+            subset["severity_pct"] = subset["score"] / subset["max_score"] * 100
+            tl = (
+                subset.groupby("date")["severity_pct"]
+                .mean()
+                .reset_index()
+                .rename(columns={"severity_pct": "Severity (%)"})
+            )
+            timeline_chart = (
+                alt.Chart(tl)
+                .mark_line(point=True)
+                .encode(x="date:T", y="Severity (%):Q")
+            )
+            st.altair_chart(timeline_chart, use_container_width=True)
+        else:
+            st.caption("No data yet for this scale.")
 
         # Download logs
         st.download_button(
@@ -954,7 +1181,7 @@ else:  # Mood journal
             df_j.to_csv(JOURNAL_PATH, index=False)
         st.success(TEXT["journal_saved"])
 
-    # Simple analysis of last entry
+    # Advanced journal insight
     df_j = load_safe_csv(JOURNAL_PATH)
     if df_j.empty:
         st.info(TEXT["journal_none"])
@@ -976,6 +1203,7 @@ else:  # Mood journal
             "হতাশ",
             "একাকী",
             "টেনশন",
+            "চাপ",
         ]
         pos_words = [
             "happy",
@@ -985,23 +1213,26 @@ else:  # Mood journal
             "উৎসাহী",
             "খুশি",
             "শান্ত",
+            "আনন্দ",
         ]
         neg_hits = sum(w in txt for w in neg_words)
         pos_hits = sum(w in txt for w in pos_words)
 
         if neg_hits > pos_hits:
             st.write(
-                "Your words contain more stress/negative signals. "
-                "Try doing one small kind thing for yourself today (rest, walk, or talk to someone safe)."
+                "Your words contain more stress/negative feelings. "
+                "Try doing one small kind thing for yourself today (rest, a short walk, "
+                "listening to music or talking to someone you trust)."
             )
         elif pos_hits > neg_hits:
             st.write(
                 "Your entry shows some positive or hopeful words. "
-                "Notice what helped you feel this way and keep those habits."
+                "Notice what helped you feel this way and try to keep those habits nearby."
             )
         else:
             st.write(
-                "Your entry is balanced or neutral. Keep observing your mood and write regularly to see patterns."
+                "Your entry seems balanced or neutral. Writing regularly can help you notice "
+                "which people, places or activities affect your mood most."
             )
 
     st.markdown("</div>", unsafe_allow_html=True)
