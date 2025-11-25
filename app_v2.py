@@ -1,3 +1,11 @@
+################################################################################
+# AI-based Mental Health Assessment — v5 FINAL
+# - English + Bangla
+# - GAD-7 / PHQ-9 / PSS-10 inspired scoring
+# - Live score preview
+# - Auto-reset corrupted CSV log
+################################################################################
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -285,7 +293,7 @@ def score_and_risk(values, target):
         risk = "Low"
     elif total <= 26:
         level = "Moderate"
-        risk = "High"     # moderate PSS means higher stress
+        risk = "High"     # moderate PSS = high stress
     else:
         level = "Severe"
         risk = "Critical"
@@ -302,6 +310,25 @@ def risk_badge_class(risk):
 
 
 LOG_PATH = "log.csv"
+
+
+def load_safe_csv(path: str) -> pd.DataFrame:
+    """
+    Safe CSV loader that auto-resets corrupted CSV files.
+    If CSV cannot be parsed, it is deleted and an empty DataFrame is returned.
+    """
+    if not os.path.exists(path):
+        return pd.DataFrame()
+
+    try:
+        return pd.read_csv(path)
+    except Exception:
+        # Auto-reset corrupted file
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+        return pd.DataFrame()
 
 # ------------------------------------------------------------------
 # SIDEBAR NAV
@@ -367,17 +394,15 @@ if page == TEXT["nav_screen"]:
 
     # SAVE & FINAL PREDICTION BUTTON
     if st.button(TEXT["btn_predict"]):
-        # compute again (safe)
         label_str, risk, total_score, max_score = score_and_risk(responses, target)
-
         badge_cls = risk_badge_class(risk)
+
         st.markdown(
             f"<span class='badge {badge_cls}'>🎯 {label_str}</span>"
-            f"<span class='badge {badge_cls}'>{TEXT['risk_level']}: {risk}</span>",
+            f"<span class='badge {badge_cls}'>🩺 {TEXT['risk_level']}: {risk}</span>",
             unsafe_allow_html=True,
         )
 
-        # Suggested actions (language-independent text kept simple)
         suggestions = {
             "Low": "Maintain good sleep, food, exercise and keep monitoring your mood.",
             "Moderate": "Try relaxation, journaling, breathing exercises and talk to trusted people.",
@@ -387,7 +412,7 @@ if page == TEXT["nav_screen"]:
         st.write(f"### {TEXT['suggested_actions']}")
         st.write(suggestions.get(risk, ""))
 
-        # Save to CSV
+        # Save to CSV (log)
         row = {
             "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "language": LANG,
@@ -414,11 +439,12 @@ if page == TEXT["nav_dash"]:
     st.markdown("<div class='main-card'>", unsafe_allow_html=True)
     st.header(TEXT["dash_title"])
 
-    if not os.path.exists(LOG_PATH):
+    df = load_safe_csv(LOG_PATH)
+
+    if df.empty:
         st.warning(TEXT["no_logs"])
         st.markdown("</div>", unsafe_allow_html=True)
     else:
-        df = pd.read_csv(LOG_PATH)
         st.subheader(TEXT["dash_last"])
         st.dataframe(df.tail(20), use_container_width=True)
 
@@ -426,8 +452,7 @@ if page == TEXT["nav_dash"]:
         st.subheader(TEXT["dash_risk_dist"])
         risk_counts = df["risk"].value_counts().reset_index()
         risk_counts.columns = ["risk", "count"]
-
-        chart = (
+        risk_chart = (
             alt.Chart(risk_counts)
             .mark_bar()
             .encode(
@@ -436,18 +461,18 @@ if page == TEXT["nav_dash"]:
                 color="risk:N",
             )
         )
-        st.altair_chart(chart, use_container_width=True)
+        st.altair_chart(risk_chart, use_container_width=True)
 
         # Over time
         st.subheader(TEXT["dash_over_time"])
         df["datetime"] = pd.to_datetime(df["datetime"])
         trend = df.groupby(df["datetime"].dt.date).size().reset_index(name="screenings")
-        line = (
+        trend_chart = (
             alt.Chart(trend)
             .mark_line(point=True)
             .encode(x="datetime:T", y="screenings:Q")
         )
-        st.altair_chart(line, use_container_width=True)
+        st.altair_chart(trend_chart, use_container_width=True)
 
         # Download logs
         st.download_button(
