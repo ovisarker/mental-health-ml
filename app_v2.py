@@ -1,9 +1,9 @@
 ################################################################################
-# AI-based Mental Health Assessment — v5 FINAL
+# AI-based Mental Health Assessment — v8 FINAL
 # - English + Bangla
 # - GAD-7 / PHQ-9 / PSS-10 inspired scoring
-# - Live score preview
-# - Auto-reset corrupted CSV log
+# - User profile, live preview, dashboard, mood prediction, coach
+# - Private mode + auto-reset CSV logs
 ################################################################################
 
 import streamlit as st
@@ -44,6 +44,14 @@ h1, h2, h3, h4, h5, h6 { color:#111827 !important; font-weight:700 !important; }
     font-size:0.9rem;
 }
 
+.q-card {
+    background:#F9FAFB;
+    border-radius:12px;
+    padding:12px 14px;
+    margin-bottom:6px;
+    border:1px solid #E5E7EB;
+}
+
 .badge {
     padding:8px 14px;
     border-radius:999px;
@@ -63,10 +71,40 @@ h1, h2, h3, h4, h5, h6 { color:#111827 !important; font-weight:700 !important; }
     font-size:0.85rem;
     color:#6B7280;
 }
+
+.coach-card {
+    background:#ECFEFF;
+    border-radius:14px;
+    padding:16px;
+    border:1px solid #BAE6FD;
+}
 </style>
 """,
     unsafe_allow_html=True,
 )
+
+LOG_PATH = "log.csv"
+USER_PATH = "users.csv"
+
+# ------------------------------------------------------------------
+# SAFE CSV LOADER (AUTO-RESET ON CORRUPTION)
+# ------------------------------------------------------------------
+def load_safe_csv(path: str) -> pd.DataFrame:
+    """
+    Safe CSV loader that auto-resets corrupted CSV files.
+    If CSV cannot be parsed, it is deleted and an empty DataFrame is returned.
+    """
+    if not os.path.exists(path):
+        return pd.DataFrame()
+
+    try:
+        return pd.read_csv(path)
+    except Exception:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+        return pd.DataFrame()
 
 # ------------------------------------------------------------------
 # LANGUAGE STRINGS
@@ -78,11 +116,12 @@ TEXT = {
         "app_title": "AI-based Mental Health Assessment",
         "nav_screen": "🧩 Screening",
         "nav_dash": "📊 Dashboard",
+        "nav_coach": "🧑‍⚕️ Coach",
         "choose_target": "What would you like to assess?",
         "screening_form": "Screening Form",
         "instructions": "Rate each statement from 1 (lowest) to 5 (highest) based on the last 2 weeks.",
         "scale_title": "Scale Meaning (1–5)",
-        "btn_predict": "🔍 Save & Predict Mental Health Status",
+        "btn_predict": "🔍 Save & Download Report",
         "live_preview": "Live Score Preview",
         "risk_level": "Risk Level",
         "suggested_actions": "Suggested Actions",
@@ -93,16 +132,30 @@ TEXT = {
         "dash_last": "Recent Screening Results",
         "dash_risk_dist": "Risk Distribution",
         "dash_over_time": "Screenings Over Time",
+        "dash_pred": "Simple Mood Prediction (next screening)",
+        "profile_title": "User Profile",
+        "profile_name": "Name (optional)",
+        "profile_age": "Age group",
+        "profile_save": "Save profile",
+        "profile_saved": "Profile saved.",
+        "private_mode": "Private mode (do NOT save my results)",
+        "clear_data": "🗑 Clear all saved screenings & profiles",
+        "clear_done": "All CSV data cleared.",
+        "report_title": "Mental Health Screening Report",
+        "coach_intro": "Get supportive, practical tips based on your last saved result or chosen severity.",
+        "coach_choose": "Choose a severity level (or use your last result):",
+        "coach_btn": "Get guidance",
     },
     "বাংলা (Bangla)": {
         "app_title": "এআই ভিত্তিক মানসিক স্বাস্থ্যের মূল্যায়ন",
         "nav_screen": "🧩 স্ক্রিনিং",
         "nav_dash": "📊 ড্যাশবোর্ড",
+        "nav_coach": "🧑‍⚕️ কোচ",
         "choose_target": "আপনি কোনটি মূল্যায়ন করতে চান?",
         "screening_form": "স্ক্রিনিং ফর্ম",
         "instructions": "গত ২ সপ্তাহের ভিত্তিতে প্রতিটি প্রশ্নের জন্য ১ (সবচেয়ে কম) থেকে ৫ (সবচেয়ে বেশি) নির্বাচন করুন।",
         "scale_title": "স্কেল মানে (১–৫)",
-        "btn_predict": "🔍 সেভ ও পূর্বাভাস দেখুন",
+        "btn_predict": "🔍 সেভ ও রিপোর্ট ডাউনলোড",
         "live_preview": "লাইভ স্কোর প্রিভিউ",
         "risk_level": "ঝুঁকির স্তর",
         "suggested_actions": "পরামর্শকৃত পদক্ষেপ",
@@ -113,6 +166,19 @@ TEXT = {
         "dash_last": "সাম্প্রতিক স্ক্রিনিং ফলাফল",
         "dash_risk_dist": "ঝুঁকির মাত্রা বণ্টন",
         "dash_over_time": "সময়ের সাথে স্ক্রিনিং সংখ্যা",
+        "dash_pred": "সহজ মুড প্রেডিকশন (পরবর্তী স্ক্রিনিংয়ের পূর্বাভাস)",
+        "profile_title": "ইউজার প্রোফাইল",
+        "profile_name": "নাম (ইচ্ছামত)",
+        "profile_age": "বয়সের গ্রুপ",
+        "profile_save": "প্রোফাইল সেভ করুন",
+        "profile_saved": "প্রোফাইল সংরক্ষণ হয়েছে।",
+        "private_mode": "প্রাইভেট মোড (ফলাফল সেভ হবে না)",
+        "clear_data": "🗑 সব সেভ করা ডেটা মুছে ফেলুন",
+        "clear_done": "সব CSV ডেটা মুছে ফেলা হয়েছে।",
+        "report_title": "মানসিক স্বাস্থ্য স্ক্রিনিং রিপোর্ট",
+        "coach_intro": "আপনার সর্বশেষ ফলাফল বা নির্বাচিত স্তরের উপর ভিত্তি করে সহায়ক গাইডলাইন পাবেন।",
+        "coach_choose": "একটি তীব্রতার স্তর বেছে নিন (বা শেষ ফলাফল ব্যবহার করুন):",
+        "coach_btn": "পরামর্শ দেখান",
     },
 }[LANG]
 
@@ -308,34 +374,89 @@ def risk_badge_class(risk):
         "Critical": "badge-crit",
     }.get(risk, "badge-mod")
 
+# ------------------------------------------------------------------
+# USER PROFILE HELPERS
+# ------------------------------------------------------------------
+def save_profile(name, age_group):
+    df_users = load_safe_csv(USER_PATH)
+    new_row = pd.DataFrame(
+        [{"name": name, "age_group": age_group, "updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}]
+    )
+    if df_users.empty:
+        new_row.to_csv(USER_PATH, index=False)
+    else:
+        # overwrite or append (simple append now)
+        df_users = pd.concat([df_users, new_row], ignore_index=True)
+        df_users.to_csv(USER_PATH, index=False)
 
-LOG_PATH = "log.csv"
 
-
-def load_safe_csv(path: str) -> pd.DataFrame:
-    """
-    Safe CSV loader that auto-resets corrupted CSV files.
-    If CSV cannot be parsed, it is deleted and an empty DataFrame is returned.
-    """
-    if not os.path.exists(path):
-        return pd.DataFrame()
-
-    try:
-        return pd.read_csv(path)
-    except Exception:
-        # Auto-reset corrupted file
-        try:
-            os.remove(path)
-        except Exception:
-            pass
-        return pd.DataFrame()
+def get_last_profile():
+    df_users = load_safe_csv(USER_PATH)
+    if df_users.empty:
+        return "", ""
+    last = df_users.iloc[-1]
+    return last.get("name", ""), last.get("age_group", "")
 
 # ------------------------------------------------------------------
-# SIDEBAR NAV
+# REPORT GENERATION (TEXT FILE)
+# ------------------------------------------------------------------
+def build_report_text(
+    profile_name, target, label_str, risk, total_score, max_score, lang
+) -> str:
+    title = TEXT["report_title"]
+    lines = [
+        f"{title}",
+        "-" * len(title),
+        f"Generated at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"Language: {lang}",
+        "",
+        f"Name: {profile_name if profile_name else 'N/A'}",
+        f"Assessment Type: {target}",
+        f"Severity: {label_str}",
+        f"Risk Level: {risk}",
+        f"Score: {total_score} / {max_score}",
+        "",
+        "Note: This is a self-assessment screening report and does not replace\n"
+        "any clinical diagnosis, treatment or professional consultation.",
+    ]
+    return "\n".join(lines).encode("utf-8")
+
+# ------------------------------------------------------------------
+# SIDEBAR: PROFILE + SETTINGS
+# ------------------------------------------------------------------
+st.sidebar.markdown(f"### {TEXT['profile_title']}")
+
+last_name, last_age = get_last_profile()
+
+profile_name = st.sidebar.text_input(TEXT["profile_name"], value=last_name or "")
+age_group = st.sidebar.selectbox(
+    TEXT["profile_age"],
+    ["", "<18", "18-24", "25-34", "35-44", "45-59", "60+"],
+    index=(["", "<18", "18-24", "25-34", "35-44", "45-59", "60+"].index(last_age) if last_age in ["", "<18", "18-24", "25-34", "35-44", "45-59", "60+"] else 0),
+)
+
+if st.sidebar.button(TEXT["profile_save"]):
+    if profile_name or age_group:
+        save_profile(profile_name, age_group)
+        st.sidebar.success(TEXT["profile_saved"])
+
+private_mode = st.sidebar.checkbox(TEXT["private_mode"], value=False)
+
+if st.sidebar.button(TEXT["clear_data"]):
+    for path in [LOG_PATH, USER_PATH]:
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+    st.sidebar.success(TEXT["clear_done"])
+
+# ------------------------------------------------------------------
+# NAVIGATION
 # ------------------------------------------------------------------
 page = st.sidebar.radio(
     "Navigation",
-    [TEXT["nav_screen"], TEXT["nav_dash"]],
+    [TEXT["nav_screen"], TEXT["nav_dash"], TEXT["nav_coach"]],
 )
 
 # ------------------------------------------------------------------
@@ -372,9 +493,10 @@ if page == TEXT["nav_screen"]:
     with left_col:
         qs = QUESTIONS_EN[target] if LANG == "English" else QUESTIONS_BN[target]
         for i, q in enumerate(qs):
+            st.markdown(f"<div class='q-card'>{q}</div>", unsafe_allow_html=True)
             responses.append(
                 st.slider(
-                    label=q,
+                    label="",  # we show question above in card
                     min_value=1,
                     max_value=5,
                     value=3,
@@ -392,7 +514,7 @@ if page == TEXT["nav_screen"]:
         st.write(f"**Severity:** {label_str}")
         st.write(f"**{TEXT['risk_level']}:** {risk}")
 
-    # SAVE & FINAL PREDICTION BUTTON
+    # SAVE, LOG, REPORT
     if st.button(TEXT["btn_predict"]):
         label_str, risk, total_score, max_score = score_and_risk(responses, target)
         badge_cls = risk_badge_class(risk)
@@ -403,6 +525,7 @@ if page == TEXT["nav_screen"]:
             unsafe_allow_html=True,
         )
 
+        # Suggested actions
         suggestions = {
             "Low": "Maintain good sleep, food, exercise and keep monitoring your mood.",
             "Moderate": "Try relaxation, journaling, breathing exercises and talk to trusted people.",
@@ -412,30 +535,50 @@ if page == TEXT["nav_screen"]:
         st.write(f"### {TEXT['suggested_actions']}")
         st.write(suggestions.get(risk, ""))
 
-        # Save to CSV (log)
-        row = {
-            "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "language": LANG,
-            "target": target,
-            "label": label_str,
-            "risk": risk,
-            "score": total_score,
-            "max_score": max_score,
-        }
-        df_row = pd.DataFrame([row])
-        if os.path.exists(LOG_PATH):
-            df_row.to_csv(LOG_PATH, mode="a", header=False, index=False)
+        # Save to CSV if not in private mode
+        if not private_mode:
+            df_log = load_safe_csv(LOG_PATH)
+            new_row = pd.DataFrame(
+                [
+                    {
+                        "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "language": LANG,
+                        "user_name": profile_name,
+                        "age_group": age_group,
+                        "target": target,
+                        "label": label_str,
+                        "risk": risk,
+                        "score": total_score,
+                        "max_score": max_score,
+                    }
+                ]
+            )
+            if df_log.empty:
+                new_row.to_csv(LOG_PATH, index=False)
+            else:
+                df_log = pd.concat([df_log, new_row], ignore_index=True)
+                df_log.to_csv(LOG_PATH, index=False)
+            st.success("✅ Screening saved.")
         else:
-            df_row.to_csv(LOG_PATH, index=False)
+            st.info("🔒 Private mode enabled — result not saved.")
 
-        st.success("✅ Screening saved.")
+        # Build downloadable text report
+        report_bytes = build_report_text(
+            profile_name, target, label_str, risk, total_score, max_score, LANG
+        )
+        st.download_button(
+            "⬇️ Download text report",
+            data=report_bytes,
+            file_name="mental_health_report.txt",
+            mime="text/plain",
+        )
 
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ------------------------------------------------------------------
 # 📊 DASHBOARD PAGE
 # ------------------------------------------------------------------
-if page == TEXT["nav_dash"]:
+elif page == TEXT["nav_dash"]:
     st.markdown("<div class='main-card'>", unsafe_allow_html=True)
     st.header(TEXT["dash_title"])
 
@@ -474,6 +617,25 @@ if page == TEXT["nav_dash"]:
         )
         st.altair_chart(trend_chart, use_container_width=True)
 
+        # Simple mood prediction (linear trend on score)
+        st.subheader(TEXT["dash_pred"])
+        try:
+            # map dates to integer index for regression
+            df_sorted = df.sort_values("datetime")
+            x = np.arange(len(df_sorted))
+            y = df_sorted["score"].values / df_sorted["max_score"].values * 100
+            if len(x) >= 2:
+                coeffs = np.polyfit(x, y, 1)
+                next_x = len(x)
+                next_y = coeffs[0] * next_x + coeffs[1]
+                next_y = float(np.clip(next_y, 0, 100))
+                st.write(f"📈 Predicted next severity (overall): **{next_y:.1f}% of max**")
+                st.progress(int(next_y))
+            else:
+                st.write("Not enough screenings yet to predict trend.")
+        except Exception:
+            st.write("Could not compute prediction from existing data.")
+
         # Download logs
         st.download_button(
             "⬇️ Download all results (CSV)",
@@ -483,3 +645,71 @@ if page == TEXT["nav_dash"]:
         )
 
         st.markdown("</div>", unsafe_allow_html=True)
+
+# ------------------------------------------------------------------
+# 🧑‍⚕️ COACH PAGE
+# ------------------------------------------------------------------
+else:
+    st.markdown("<div class='main-card'>", unsafe_allow_html=True)
+    st.header(TEXT["nav_coach"])
+    st.markdown(f"<p class='small-muted'>{TEXT['coach_intro']}</p>", unsafe_allow_html=True)
+
+    df = load_safe_csv(LOG_PATH)
+    last_label = None
+    last_risk = None
+    if not df.empty:
+        last = df.iloc[-1]
+        last_label = last.get("label", None)
+        last_risk = last.get("risk", None)
+
+    st.write(TEXT["coach_choose"])
+    severity_choice = st.selectbox(
+        "Severity",
+        ["Use my last result"] + ["Minimal", "Mild", "Moderate", "Severe"],
+    )
+
+    if severity_choice == "Use my last result" and last_label is not None:
+        base_label = last_label
+    elif severity_choice == "Use my last result":
+        base_label = "Minimal"
+    else:
+        # generic label
+        base_label = f"{severity_choice} level"
+
+    if st.button(TEXT["coach_btn"]):
+        # simple rule-based guidance
+        st.markdown("<div class='coach-card'>", unsafe_allow_html=True)
+        st.write(f"**Current severity:** {base_label}")
+
+        if "Minimal" in base_label:
+            st.write(
+                "- Keep following your healthy habits (sleep, food, exercise).\n"
+                "- Stay connected with people who make you feel safe.\n"
+                "- Repeat screening once in a while to monitor changes."
+            )
+        elif "Mild" in base_label:
+            st.write(
+                "- Add 10–20 minutes of walking or light exercise daily.\n"
+                "- Try basic breathing exercises or short meditation.\n"
+                "- Write down your thoughts in a journal to clear your mind.\n"
+                "- Talk with a trusted friend or family member about how you feel."
+            )
+        elif "Moderate" in base_label:
+            st.write(
+                "- Prioritize tasks and reduce overload where possible.\n"
+                "- Fix a regular sleep and wake-up time.\n"
+                "- Avoid too much caffeine, nicotine and scrolling late at night.\n"
+                "- Consider booking an appointment with a counselor or psychologist."
+            )
+        else:  # Severe or higher
+            st.write(
+                "- Your symptoms seem strong. You deserve proper support.\n"
+                "- Please reach out to a licensed mental-health professional soon.\n"
+                "- If you have thoughts of self-harm or feel unsafe, contact\n"
+                "  emergency services or a crisis helpline immediately.\n"
+                "- Share how you feel with someone you trust right now."
+            )
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
