@@ -33,9 +33,11 @@ def load_safe_csv(path: str):
         return pd.DataFrame()
     try:
         return pd.read_csv(path)
-    except:
-        try: os.remove(path)
-        except: pass
+    except Exception:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
         return pd.DataFrame()
 
 # ------------------------------------------------------------------------------
@@ -50,11 +52,11 @@ TEXT = {
         "dash": "📊 Dashboard",
         "choose_target": "Select assessment",
         "screening_form": "Screening Form",
-        "instructions": "Rate each statement from 1 (lowest) to 5 (highest)",
+        "instructions": "Rate each statement from 1 (lowest) to 5 (highest).",
         "scale": "Scale Meaning",
         "predict": "🔍 Predict Mental Health Status",
         "risk_level": "Risk Level",
-        "suggested": "Suggested Actions",
+        "suggested": "Suggested Actions (not a diagnosis)",
         "no_logs": "No screening records found.",
         "dash_title": "Analytics Dashboard",
         "dash_recent": "Recent Results",
@@ -67,23 +69,23 @@ TEXT = {
         "dash": "📊 ড্যাশবোর্ড",
         "choose_target": "মূল্যায়ন নির্বাচন করুন",
         "screening_form": "স্ক্রিনিং ফর্ম",
-        "instructions": "প্রতিটি প্রশ্নের জন্য ১ (সর্বনিম্ন) থেকে ৫ (সর্বোচ্চ) রেটিং দিন",
+        "instructions": "প্রতিটি প্রশ্নের জন্য ১ (সর্বনিম্ন) থেকে ৫ (সর্বোচ্চ) নির্বাচন করুন।",
         "scale": "স্কেল মানে",
         "predict": "🔍 মানসিক স্বাস্থ্যের ফলাফল দেখুন",
         "risk_level": "ঝুঁকির স্তর",
-        "suggested": "প্রস্তাবিত পদক্ষেপ",
-        "no_logs": "কোনও স্ক্রিনিং ডেটা পাওয়া যায়নি।",
+        "suggested": "প্রস্তাবিত পদক্ষেপ (ডায়াগনোসিস নয়)",
+        "no_logs": "কোনও স্ক্রিনিং ডেটা পাওয়া যায়নি।",
         "dash_title": "অ্যানালিটিক্স ড্যাশবোর্ড",
         "dash_recent": "সাম্প্রতিক ফলাফল",
         "dash_risk": "ঝুঁকির বণ্টন",
-        "dash_trend": "সময়ের সঙ্গে স্ক্রিনিং প্রবণতা",
+        "dash_trend": "সময়ের সাথে স্ক্রিনিং প্রবণতা",
     },
 }[LANG]
 
 # ------------------------------------------------------------------------------
-# QUESTIONS
+# QUESTIONS (EN + BN)
 # ------------------------------------------------------------------------------
-QUESTIONS = {
+QUESTIONS_EN = {
     "Anxiety": [
         "Feeling nervous, anxious, or on edge",
         "Not being able to stop or control worrying",
@@ -118,67 +120,161 @@ QUESTIONS = {
     ],
 }
 
-# Bangla Translation
 QUESTIONS_BN = {
     "Anxiety": [
-        "নার্ভাস বা উদ্বিগ্ন অনুভব",
-        "দুশ্চিন্তা থামাতে বা নিয়ন্ত্রণ করতে না পারা",
-        "বিভিন্ন বিষয়ে অতিরিক্ত দুশ্চিন্তা",
-        "মনকে শান্ত করতে কষ্ট হওয়া",
-        "স্থির হয়ে বসে থাকতে সমস্যা",
-        "সহজেই বিরক্ত হয়ে যাওয়া",
-        "মনে হওয়া কোনো খারাপ কিছু ঘটবে",
+        "নার্ভাস, উদ্বিগ্ন বা অস্থির অনুভব করা",
+        "দুশ্চিন্তা থামাতে বা নিয়ন্ত্রণ করতে না পারা",
+        "বিভিন্ন বিষয় নিয়ে অতিরিক্ত দুশ্চিন্তা করা",
+        "মনকে শান্ত করতে কষ্ট হওয়া",
+        "এতটাই অস্থির যে বসে থাকতে কষ্ট হয়",
+        "সহজেই বিরক্ত বা রাগান্বিত হয়ে যাওয়া",
+        "মনে হওয়া যেন কিছু খারাপ ঘটতে যাচ্ছে",
     ],
     "Stress": [
-        "অপ্রত্যাশিত ঘটনায় খুব কষ্ট পাওয়া",
-        "গুরুত্বপূর্ণ বিষয় নিয়ন্ত্রণ করতে না পারা",
+        "অপ্রত্যাশিত ঘটনার কারণে খুব কষ্ট পাওয়া",
+        "গুরুত্বপূর্ণ বিষয়গুলো নিয়ন্ত্রণ করতে না পারার অনুভূতি",
         "নার্ভাস ও চাপগ্রস্ত অনুভব করা",
-        "সমস্যা সামলাতে আত্মবিশ্বাসী হওয়া",
-        "সব কিছু ইচ্ছেমতো হওয়া",
-        "সব কাজ করতে না পারা",
-        "বিরক্তিকর বিষয় নিয়ন্ত্রণ করতে পারা",
-        "অনুভব করা সবকিছুর উপরে আছেন",
-        "বিষয় নিয়ন্ত্রণের বাইরে গেলে রাগ হওয়া",
-        "সমস্যা খুব দ্রুত জমে ওঠা",
+        "সমস্যা সামলাতে আত্মবিশ্বাসী হওয়া",
+        "সব কিছু ইচ্ছেমতো হওয়া",
+        "সব কাজ সামলাতে না পারার অনুভূতি",
+        "বিরক্তিকর বিষয়গুলো নিয়ন্ত্রণ করতে পারা",
+        "অনুভব করা যে আপনি সব কিছুর উপরে আছেন",
+        "বিষয়গুলো নিয়ন্ত্রণের বাইরে চলে গেলে রাগ হওয়া",
+        "অনুভব করা যে সমস্যাগুলো খুব দ্রুত জমে যাচ্ছে",
     ],
     "Depression": [
-        "কাজে আগ্রহ কমে যাওয়া",
-        "মনখারাপ, বিষণ্ন বা আশাহীন লাগা",
-        "ঘুমের সমস্যা বা বেশি ঘুমানো",
-        "অল্পতেই ক্লান্ত হওয়া",
-        "খাবারে অনাগ্রহ বা অতিরিক্ত খাওয়া",
-        "নিজেকে ব্যর্থ মনে হওয়া",
-        "কাজে মনোযোগ দিতে সমস্যা",
-        "ধীরে চলা/অস্থিরতা",
-        "নিজেকে আঘাত করার চিন্তা",
+        "কাজকর্মে আগ্রহ বা আনন্দ কমে যাওয়া",
+        "মন খারাপ, বিষণ্ন বা আশাহীন লাগা",
+        "ঘুমের সমস্যা বা অতিরিক্ত ঘুমানো",
+        "অল্পতেই ক্লান্ত বা শক্তিহীন লাগা",
+        "খাবারের আগ্রহ কমে যাওয়া বা বেশি খাওয়া",
+        "নিজেকে ব্যর্থ বা খুব খারাপ মনে হওয়া",
+        "কোনো কাজে মনোযোগ দিতে কষ্ট হওয়া",
+        "ধীরে চলাফেরা/কথা বলা বা অস্থিরতা",
+        "নিজেকে আঘাত করা বা মৃত্যুর চিন্তা",
     ],
 }
 
 # ------------------------------------------------------------------------------
-# SCORE CALCULATION
+# SCALE MEANING (for right-side box)
+# ------------------------------------------------------------------------------
+SCALE_EN = {
+    "Anxiety": [
+        "Not at all",
+        "Several days",
+        "Half the days",
+        "Nearly every day",
+        "Almost always",
+    ],
+    "Depression": [
+        "Not at all",
+        "Several days",
+        "Half the days",
+        "Nearly every day",
+        "Almost always",
+    ],
+    "Stress": [
+        "Never",
+        "Almost never",
+        "Sometimes",
+        "Fairly often",
+        "Very often",
+    ],
+}
+
+SCALE_BN = {
+    "Anxiety": [
+        "একদমই না",
+        "কিছুদিন",
+        "অর্ধেক দিন",
+        "প্রায় প্রতিদিন",
+        "প্রায় সব সময়",
+    ],
+    "Depression": [
+        "একদমই না",
+        "কিছুদিন",
+        "অর্ধেক দিন",
+        "প্রায় প্রতিদিন",
+        "প্রায় সব সময়",
+    ],
+    "Stress": [
+        "কখনোই না",
+        "খুব কম",
+        "মাঝে মাঝে",
+        "প্রায়ই",
+        "প্রায় সব সময়",
+    ],
+}
+
+# ------------------------------------------------------------------------------
+# SCORING + RISK
 # ------------------------------------------------------------------------------
 def score_and_risk(values, target):
+    """Return (label, risk, total, max_score). Values are 1–5."""
     scaled = [v - 1 for v in values]
 
     if target == "Anxiety":
-        total = sum(scaled)
-        if total <= 4: return "Minimal Anxiety", "Low", total, 21
-        if total <= 9: return "Mild Anxiety", "Moderate", total, 21
-        if total <= 14: return "Moderate Anxiety", "High", total, 21
-        return "Severe Anxiety", "Critical", total, 21
+        total = sum(scaled)  # 0–21
+        if total <= 4:
+            return "Minimal Anxiety", "Low", total, 21
+        elif total <= 9:
+            return "Mild Anxiety", "Moderate", total, 21
+        elif total <= 14:
+            return "Moderate Anxiety", "High", total, 21
+        else:
+            return "Severe Anxiety", "Critical", total, 21
 
     if target == "Stress":
-        total = sum(scaled)
-        if total <= 13: return "Minimal Stress", "Low", total, 40
-        if total <= 26: return "Moderate Stress", "High", total, 40
-        return "Severe Stress", "Critical", total, 40
+        total = sum(scaled)  # 0–40
+        if total <= 13:
+            return "Minimal Stress", "Low", total, 40
+        elif total <= 26:
+            return "Moderate Stress", "High", total, 40
+        else:
+            return "Severe Stress", "Critical", total, 40
 
     if target == "Depression":
-        total = sum(scaled)
-        if total <= 4: return "Minimal Depression", "Low", total, 27
-        if total <= 9: return "Mild Depression", "Moderate", total, 27
-        if total <= 14: return "Moderate Depression", "High", total, 27
-        return "Severe Depression", "Critical", total, 27
+        total = sum(scaled)  # 0–27
+        if total <= 4:
+            return "Minimal Depression", "Low", total, 27
+        elif total <= 9:
+            return "Mild Depression", "Moderate", total, 27
+        elif total <= 14:
+            return "Moderate Depression", "High", total, 27
+        else:
+            return "Severe Depression", "Critical", total, 27
+
+# ------------------------------------------------------------------------------
+# PROFESSIONAL SUGGESTED ACTIONS
+# ------------------------------------------------------------------------------
+def professional_suggestions(target: str, risk: str) -> str:
+    """Return a short clinical-style paragraph for the given risk level."""
+    if risk == "Low":
+        return (
+            "Current symptoms are in a lower range. Maintaining regular sleep, balanced nutrition, "
+            "physical activity and supportive social contact is recommended. Monitoring mood and stress "
+            "over time can help detect changes early."
+        )
+    if risk == "Moderate":
+        return (
+            "Symptoms are clinically relevant and may intermittently affect concentration, energy or motivation. "
+            "Structured daily routines, stress-management strategies (such as breathing exercises and scheduling breaks) "
+            "and talking with trusted people or a counselor can be helpful. If difficulties persist for several weeks, "
+            "a professional mental health assessment is advisable."
+        )
+    if risk == "High":
+        return (
+            "Symptoms are in a higher range and likely impact day-to-day functioning. Reducing avoidable overload, "
+            "seeking support from a qualified counselor, psychologist or physician and discussing work/study adjustments "
+            "would be clinically appropriate. Early intervention can prevent further deterioration."
+        )
+    # Critical
+    return (
+        "Symptoms are severe and may significantly interfere with safety, functioning or quality of life. "
+        "A prompt consultation with a mental health professional or physician is strongly recommended. "
+        "If there are thoughts of self-harm or you feel unable to stay safe, emergency services or crisis "
+        "hotlines should be contacted immediately."
+    )
 
 # ------------------------------------------------------------------------------
 # NAVIGATION
@@ -191,18 +287,39 @@ page = st.sidebar.radio("Navigation", [TEXT["screen"], TEXT["dash"]])
 if page == TEXT["screen"]:
     st.title(TEXT["title"])
 
-    # Select assessment
     target = st.selectbox(TEXT["choose_target"], ["Anxiety", "Stress", "Depression"])
 
     st.subheader(f"{target} — {TEXT['screening_form']}")
     st.write(TEXT["instructions"])
 
-    questions = QUESTIONS[target] if LANG == "English" else QUESTIONS_BN[target]
+    # Layout: questions left, scale meaning right
+    col_q, col_scale = st.columns([3, 1.4])
 
+    # Right side: Scale Meaning (1–5)
+    with col_scale:
+        st.markdown(f"**{TEXT['scale']} (1–5)**")
+        if LANG == "English":
+            scale_labels = SCALE_EN[target]
+        else:
+            scale_labels = SCALE_BN[target]
+        for i, label in enumerate(scale_labels, start=1):
+            st.write(f"{i} — {label}")
+
+    # Left side: questions + sliders
     responses = []
-    for i, q in enumerate(questions):
-        st.write(f"**Q{i+1}. {q}**")
-        responses.append(st.slider(f"Q{i+1}", 1, 5, 3, label_visibility="collapsed"))
+    with col_q:
+        qs = QUESTIONS_EN[target] if LANG == "English" else QUESTIONS_BN[target]
+        for i, q_text in enumerate(qs):
+            st.write(f"**Q{i+1}. {q_text}**")
+            responses.append(
+                st.slider(
+                    f"Q{i+1}",
+                    min_value=1,
+                    max_value=5,
+                    value=3,
+                    label_visibility="collapsed",
+                )
+            )
 
     # Predict
     if st.button(TEXT["predict"]):
@@ -210,35 +327,31 @@ if page == TEXT["screen"]:
 
         st.success(f"🎯 {label}")
         st.info(f"🩺 {TEXT['risk_level']}: **{risk}**")
-        st.write(f"Score: **{total} / {max_score}**")
+        st.write(f"**Score:** {total} / {max_score}")
 
         st.write("### " + TEXT["suggested"])
-        if risk == "Low":
-            st.write("- Maintain healthy habits and regular routine.")
-        elif risk == "Moderate":
-            st.write("- Reduce stress sources; use relaxation techniques.")
-        elif risk == "High":
-            st.write("- Seek support from trusted people or counselors.")
-        else:
-            st.write("- Professional mental health support recommended.")
+        st.write(professional_suggestions(target, risk))
 
-        # Save Result
+        # Save result to CSV
         df = load_safe_csv(LOG_PATH)
         row = pd.DataFrame(
-            [{
-                "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "target": target,
-                "label": label,
-                "risk": risk,
-                "score": total,
-                "max_score": max_score,
-            }]
+            [
+                {
+                    "datetime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "target": target,
+                    "label": label,
+                    "risk": risk,
+                    "score": total,
+                    "max_score": max_score,
+                }
+            ]
         )
-        if df.empty: row.to_csv(LOG_PATH, index=False)
+        if df.empty:
+            row.to_csv(LOG_PATH, index=False)
         else:
             df = pd.concat([df, row], ignore_index=True)
             df.to_csv(LOG_PATH, index=False)
-        st.success("Saved to history.")
+        st.success("Result stored in local history.")
 
 # ------------------------------------------------------------------------------
 # PAGE: DASHBOARD
@@ -263,20 +376,28 @@ elif page == TEXT["dash"]:
         )
         st.altair_chart(chart, use_container_width=True)
 
-        # Trend
+        # Trend over time
         st.subheader(TEXT["dash_trend"])
         df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
-        trend = df.groupby(df["datetime"].dt.date).size().reset_index(name="screenings")
-        chart = alt.Chart(trend).mark_line(point=True).encode(
-            x="datetime:T", y="screenings:Q"
+        trend = (
+            df.groupby(df["datetime"].dt.date)
+            .size()
+            .reset_index(name="screenings")
         )
-        st.altair_chart(chart, use_container_width=True)
+        if not trend.empty:
+            chart = alt.Chart(trend).mark_line(point=True).encode(
+                x="datetime:T", y="screenings:Q"
+            )
+            st.altair_chart(chart, use_container_width=True)
+        else:
+            st.caption("Not enough valid dates to show a trend.")
 
+        # Download
         st.download_button(
             "⬇️ Download CSV",
             df.to_csv(index=False),
             "mh_log.csv",
-            "text/csv"
+            "text/csv",
         )
 
 # ------------------------------------------------------------------------------
