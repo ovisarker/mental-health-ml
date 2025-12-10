@@ -74,12 +74,23 @@ print("Depression_Binary:\n", df["Depression_Binary"].value_counts())
 # -------------------------------------------------------
 
 # Drop columns that are targets or derived
+#
+# Drop any columns that leak target information or are derived from target scales.
+# In addition to standard labels and totals, the dataset may include columns
+# like ``Anxiety Value`` or ``Stress Value`` which contain the sum of the
+# questionnaire items. Including these as features would lead to data leakage
+# because they are direct functions of the questionnaire responses that define
+# the binary labels. We proactively drop them if present.
 drop_cols = [
     "Depression Label",
     "Depression_Binary",
     "Anxiety_Binary",
     "Stress_Binary",
-    "Depression Value",  # if present
+    # values from original scales (may or may not exist)
+    "Depression Value",
+    "Anxiety Value",
+    "Stress Value",
+    # totals derived internally (used to create binary labels)
     "GAD_Total",
     "PSS_Total",
 ]
@@ -107,9 +118,16 @@ numeric_preprocessor = Pipeline([
     ("scaler", StandardScaler()),
 ])
 
-# For categorical features: impute missing values then one-hot encode
+# For categorical features: impute missing values, convert to string then one-hot encode.
+#
+# Casting to string avoids a TypeError in OneHotEncoder when categories contain a mix
+# of numeric and textual values. Without this, sklearn may call np.isnan on objects
+# that are not numbers, leading to ``TypeError: ufunc 'isnan' not supported``.
+from sklearn.preprocessing import FunctionTransformer  # Imported here to avoid unused import error
+
 categorical_preprocessor = Pipeline([
     ("imputer", SimpleImputer(strategy="most_frequent")),
+    ("to_str", FunctionTransformer(lambda x: x.astype(str))),
     ("encoder", OneHotEncoder(handle_unknown="ignore")),
 ])
 
