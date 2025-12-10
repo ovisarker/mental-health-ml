@@ -1,147 +1,150 @@
-# =====================================
-# app.py — Professional Streamlit App
-# Unified Mental-Health Prediction System
-# =====================================
-
+# app.py
 import streamlit as st
 import pandas as pd
-import datetime
-from predict_all import predict_all  # Import from your prediction script
-import os
+import numpy as np
 
-st.set_page_config(
-    page_title="AI Mental Health Assessment",
-    layout="wide",
-    page_icon="🧠"
+# Unified ML Pipeline import (your merged ML code)
+from unified_mental_health_pipeline import predict_for_student, determine_main_issue
+from unified_mental_health_pipeline import (
+    anxiety_model, stress_model, depression_model,
+    x_numeric, train_lr_numeric, show_top_features
 )
 
-# ------------------------------
-# Header Section
-# ------------------------------
-st.title("🧠 AI-Powered Mental Health Assessment System")
-st.markdown("""
-This tool predicts **Anxiety, Stress, and Depression** levels using Machine Learning models trained on
-validated psychometric scales (PSS-10, GAD-7, PHQ-9).  
+st.set_page_config(page_title="Mental Health Assessment (ML Based)", layout="wide")
+
+# ---------------------------------------------------------
+# PAGE HEADER
+# ---------------------------------------------------------
+st.title("🧠 Machine Learning-Based Mental Health Assessment System")
+st.write("""
+This system predicts **Anxiety**, **Stress**, and **Depression** using Machine Learning 
+(Logistic Regression + Preprocessing Pipeline).  
+It also determines the **Overall Mental Health Status** and shows **Explainable AI insights**.
 """)
 
-st.info("Fill in your information and questionnaire responses to receive AI-assisted mental health screening.")
-
-# ------------------------------
-# Sidebar – User Info
-# ------------------------------
-st.sidebar.header("📌 User Information")
-
-age = st.sidebar.selectbox("Age", ["18-22", "23-27", "28-32", "33+"])
-gender = st.sidebar.selectbox("Gender", ["Male", "Female", "Other"])
-university = st.sidebar.text_input("University Name")
-department = st.sidebar.text_input("Department")
-academic_year = st.sidebar.selectbox("Academic Year",
-                                     ["1st Year", "2nd Year", "3rd Year", "4th Year"])
-cgpa = st.sidebar.selectbox("Current CGPA", ["<2.50", "2.50-3.00", "3.00-3.50", "3.50-4.00"])
-scholarship = st.sidebar.selectbox("Scholarship/Waiver",
-                                   ["No", "Yes - Partial", "Yes - Full"])
-
-# ------------------------------
-# Questionnaire Inputs (Tabs)
-# ------------------------------
-tab1, tab2, tab3 = st.tabs(["🟨 PSS-10 (Stress)", "🟦 GAD-7 (Anxiety)", "🟥 PHQ-9 (Depression)"])
-
-# ------------------------------
-# PSS-10 Inputs
-# ------------------------------
-with tab1:
-    st.subheader("Perceived Stress Scale (PSS-10)")
-    pss = {}
-    for i in range(1, 11):
-        pss[f"PSS{i}"] = st.slider(f"PSS{i}", 0, 4, 0)
-
-# ------------------------------
-# GAD-7 Inputs
-# ------------------------------
-with tab2:
-    st.subheader("Generalized Anxiety Disorder (GAD-7)")
-    gad = {}
-    for i in range(1, 8):
-        gad[f"GAD{i}"] = st.slider(f"GAD{i}", 0, 3, 0)
-
-# ------------------------------
-# PHQ-9 Inputs
-# ------------------------------
-with tab3:
-    st.subheader("Patient Health Questionnaire (PHQ-9)")
-    phq = {}
-    for i in range(1, 10):
-        phq[f"PHQ{i}"] = st.slider(f"PHQ{i}", 0, 3, 0)
-
-# ------------------------------
-# Predict Button
-# ------------------------------
 st.markdown("---")
-if st.button("🔍 Run AI Prediction"):
-    
-    # Build user dictionary in correct format
-    user_input = {
+
+# ---------------------------------------------------------
+# INPUT FORM
+# ---------------------------------------------------------
+
+st.subheader("📋 Student Information & Questionnaire Input")
+
+with st.form("input_form"):
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        age = st.number_input("Age", 16, 40, 20)
+        gender = st.selectbox("Gender", ["Male", "Female"])
+        university = st.text_input("University")
+        department = st.text_input("Department")
+        year = st.selectbox("Academic Year", ["1st", "2nd", "3rd", "4th"])
+        cgpa = st.number_input("Current CGPA", 0.0, 4.0, 3.0)
+        scholarship = st.selectbox("Scholarship/Waiver", ["Yes", "No"])
+
+    with col2:
+        st.markdown("### 🟦 PSS (Stress) Responses")
+        PSS = [st.number_input(f"PSS{i+1}", 0, 4, 1) for i in range(10)]
+
+        st.markdown("### 🟩 GAD (Anxiety) Responses")
+        GAD = [st.number_input(f"GAD{i+1}", 0, 3, 1) for i in range(7)]
+
+        st.markdown("### 🟥 PHQ (Depression) Responses")
+        PHQ = [st.number_input(f"PHQ{i+1}", 0, 3, 1) for i in range(9)]
+
+    submitted = st.form_submit_button("🔍 Run ML Assessment")
+
+# ---------------------------------------------------------
+# RUN ML MODELS
+# ---------------------------------------------------------
+
+if submitted:
+    st.markdown("---")
+    st.subheader("🔎 ML Prediction Results")
+
+    # create dictionary for ML input
+    data = {
         "Age": age,
         "Gender": gender,
         "University": university,
         "Department": department,
-        "Academic_Year": academic_year,
+        "Academic_Year": year,
         "Current_CGPA": cgpa,
         "waiver_or_scholarship": scholarship
     }
 
-    # Add PSS, GAD, PHQ data
-    user_input.update(pss)
-    user_input.update(gad)
-    user_input.update(phq)
+    # add PSS
+    for i in range(10):
+        data[f"PSS{i+1}"] = PSS[i]
 
-    # Run prediction
-    result = predict_all(user_input)
+    # add GAD
+    for i in range(7):
+        data[f"GAD{i+1}"] = GAD[i]
 
-    # Color box style
-    def colored_box(text, color):
-        st.markdown(f"""
-        <div style="background-color:{color};padding:15px;border-radius:10px;margin:5px 0;font-size:18px;">
-            {text}
-        </div>
-        """, unsafe_allow_html=True)
+    # add PHQ
+    for i in range(9):
+        data[f"PHQ{i+1}"] = PHQ[i]
 
-    st.subheader("📊 AI Predictions")
+    # run unified ML pipeline
+    anx, str_, dep, main_issue = predict_for_student(data)
 
-    if "High" in result["Anxiety"]:
-        colored_box(f"😰 Anxiety: **{result['Anxiety']}**", "#ffcccc")
-    else:
-        colored_box(f"😌 Anxiety: **{result['Anxiety']}**", "#d4ffd4")
+    # show prediction
+    colA, colB, colC = st.columns(3)
 
-    if "High" in result["Stress"]:
-        colored_box(f"😓 Stress: **{result['Stress']}**", "#ffebcc")
-    else:
-        colored_box(f"😌 Stress: **{result['Stress']}**", "#d4ffd4")
+    with colA:
+        st.metric("Anxiety Prediction", "Present" if anx == 1 else "Absent")
 
-    if "Present" in result["Depression"]:
-        colored_box(f"😞 Depression: **{result['Depression']}**", "#ffd6d6")
-    else:
-        colored_box(f"🙂 Depression: **{result['Depression']}**", "#d4ffd4")
+    with colB:
+        st.metric("Stress Prediction", "Present" if str_ == 1 else "Absent")
 
-    # ------------------------------
-    # Save Log (CSV)
-    # ------------------------------
-    log_entry = user_input.copy()
-    log_entry.update(result)
-    log_entry["Timestamp"] = str(datetime.datetime.now())
+    with colC:
+        st.metric("Depression Prediction", "Present" if dep == 1 else "Absent")
 
-    log_df = pd.DataFrame([log_entry])
+    st.markdown("### 🧠 Overall Mental Health Status:")
+    st.success(f"**{main_issue}**")
 
-    if not os.path.exists("prediction_logs.csv"):
-        log_df.to_csv("prediction_logs.csv", index=False)
-    else:
-        log_df.to_csv("prediction_logs.csv", index=False, mode="a", header=False)
+    st.markdown("---")
 
-    st.success("Prediction saved to log file successfully!")
+    # ---------------------------------------------------------
+    # BASIC XAI (Explainability)
+    # ---------------------------------------------------------
+    st.subheader("📘 Explainable AI (XAI): Key Influential Features")
 
-    st.download_button(
-        label="⬇ Download Prediction Result",
-        data=log_df.to_csv(index=False),
-        file_name="mh_prediction_result.csv",
-        mime="text/csv"
+    st.write("""
+    These features (from Logistic Regression coefficients) indicate which questionnaire items 
+    and numeric factors contribute most to **Anxiety**, **Stress**, and **Depression** predictions.
+    """)
+
+    import pandas as pd
+    from unified_mental_health_pipeline import (
+        anx_clf_num, str_clf_num, dep_clf_num
     )
+
+    # Top Features Extraction
+    def get_top_features(model, cols, top_k=8):
+        coefs = model.coef_[0]
+        df_feat = pd.DataFrame({"Feature": cols, "Coefficient": coefs})
+        df_feat["Abs"] = df_feat["Coefficient"].abs()
+        return df_feat.sort_values("Abs", ascending=False).head(top_k)
+
+    top_anx = get_top_features(anx_clf_num, x_numeric.columns)
+    top_str = get_top_features(str_clf_num, x_numeric.columns)
+    top_dep = get_top_features(dep_clf_num, x_numeric.columns)
+
+    colX, colY, colZ = st.columns(3)
+
+    with colX:
+        st.write("### 🔵 Anxiety Top Features")
+        st.dataframe(top_anx[["Feature", "Coefficient"]])
+
+    with colY:
+        st.write("### 🟡 Stress Top Features")
+        st.dataframe(top_str[["Feature", "Coefficient"]])
+
+    with colZ:
+        st.write("### 🔴 Depression Top Features")
+        st.dataframe(top_dep[["Feature", "Coefficient"]])
+
+    st.markdown("---")
+    st.info("This ML-based assessment is not a clinical diagnosis. It identifies early risk patterns to help understand mental-health conditions.")
