@@ -1,414 +1,509 @@
-"""
-Streamlit app for a machine‑learning driven mental‑health assessment.
+# app_Pre_final.py
+# Student Mental Health Assessment using Machine Learning
+# Uses Logistic Regression models trained on Processed.csv inside the app.
 
-This app collects responses to standardised mental‑health screening
-questionnaires (GAD‑7 for anxiety, PSS‑10 for stress, and PHQ‑9 for
-depression) along with a few demographic and lifestyle indicators.  It
-uses pre‑trained machine‑learning models to classify the most
-prominent mental‑health issue for the user (anxiety, stress or
-depression).  It then evaluates the severity level of each issue
-based on the total questionnaire score and provides appropriate
-suggestions.
+import os
+from datetime import datetime
 
-Key features:
-  • Unified assessment – the user answers questions for anxiety,
-    stress and depression in one session.  After submission, the
-    app predicts which issue is most prominent using trained
-    classifiers and shows severity for each issue.
-  • Machine‑learning models – logistic regression and CatBoost
-    classifiers stored in joblib files are loaded at runtime and
-    predict probabilities for each issue.
-  • Custom severity assessment – severity levels are calculated
-    according to accepted clinical thresholds for each questionnaire.
-  • Friendly UI – built with Streamlit, the app guides the user
-    through each set of questions and presents results and
-    self‑help suggestions.
-  • Footer – acknowledges the project team (Team Dual Core).
-
-Note: this tool does not provide a formal diagnosis.  It is an
-educational resource to help users understand their wellbeing.  If
-you have urgent concerns or think you might be in crisis, please
-contact a qualified mental‑health professional or emergency services.
-"""
-
-import joblib
 import numpy as np
+import pandas as pd
 import streamlit as st
-from pathlib import Path
+from sklearn.compose import ColumnTransformer
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
+# ---------------------------------------------------------------------
+# Page config + basic theming
+# ---------------------------------------------------------------------
+st.set_page_config(
+    page_title="Student Mental Health Assessment (ML-based)",
+    page_icon="🧠",
+    layout="wide",
+)
 
-# ----------------------------------------------------------------------
-# Configuration
-# ----------------------------------------------------------------------
-
-# Paths to the trained models and encoders.  These files should exist
-# in the same directory as this script.  The models are binary
-# classifiers (1=issue present, 0=not present) trained on previously
-# collected screening data.  Encoders are loaded but not used for
-# feature transformation; instead they remain available in case the
-# underlying models expect categorical encodings of labels.
-MODEL_FILES = {
-    "Anxiety": "best_model_Anxiety_Label_Logistic_Regression.joblib",
-    "Stress": "best_model_Stress_Label_Logistic_Regression.joblib",
-    "Depression": "best_model_Depression_Label_CatBoost.joblib",
-}
-
-ENCODER_FILES = {
-    "Anxiety": "final_anxiety_encoder.joblib",
-    "Stress": "final_stress_encoder.joblib",
-    "Depression": "final_depression_encoder.joblib",
-}
-
-
-# ----------------------------------------------------------------------
-# Helper functions
-# ----------------------------------------------------------------------
-
-def load_models(models_dict: dict[str, str]) -> dict[str, object]:
-    """Load each machine‑learning model from disk.
-
-    Parameters
-    ----------
-    models_dict : dict
-        Mapping of issue names to filenames.
-
-    Returns
-    -------
-    dict
-        Mapping of issue names to loaded model objects.
-    """
-    models: dict[str, object] = {}
-    for issue, filename in models_dict.items():
-        path = Path(filename)
-        if path.exists():
-            models[issue] = joblib.load(path)
-        else:
-            st.warning(f"Model file for {issue} not found: {filename}")
-    return models
-
-
-def load_encoders(encoder_dict: dict[str, str]) -> dict[str, object]:
-    """Load label encoders from disk.
-
-    These encoders map numeric predictions back to human‑readable labels.
-    They are not used to transform feature inputs.  If an encoder file
-    is missing, a warning is displayed but prediction still proceeds.
-
-    Parameters
-    ----------
-    encoder_dict : dict
-        Mapping of issue names to filenames.
-
-    Returns
-    -------
-    dict
-        Mapping of issue names to loaded encoders.
-    """
-    encoders: dict[str, object] = {}
-    for issue, filename in encoder_dict.items():
-        path = Path(filename)
-        if path.exists():
-            encoders[issue] = joblib.load(path)
-        else:
-            st.warning(f"Encoder file for {issue} not found: {filename}")
-    return encoders
-
-
-def calculate_severity(issue: str, score: int) -> str:
-    """Return a descriptive severity level given an issue and its score.
-
-    Parameters
-    ----------
-    issue : {'Anxiety', 'Stress', 'Depression'}
-        The mental‑health issue being scored.
-    score : int
-        The total questionnaire score.
-
-    Returns
-    -------
-    str
-        A human‑readable severity rating.
-    """
-    if issue == "Anxiety":
-        if score <= 4:
-            return "Minimal or no anxiety"
-        elif score <= 9:
-            return "Mild anxiety"
-        elif score <= 14:
-            return "Moderate anxiety"
-        else:
-            return "Severe anxiety"
-    elif issue == "Stress":
-        # PSS scores range from 0–40 (10 items x 0–4).  Suggested bands:
-        if score <= 13:
-            return "Low stress"
-        elif score <= 26:
-            return "Moderate stress"
-        else:
-            return "High stress"
-    elif issue == "Depression":
-        if score <= 4:
-            return "Minimal depression"
-        elif score <= 9:
-            return "Mild depression"
-        elif score <= 14:
-            return "Moderate depression"
-        elif score <= 19:
-            return "Moderately severe depression"
-        else:
-            return "Severe depression"
-    return "Unknown"
-
-
-def get_suggestions(issue: str, severity: str) -> str:
-    """Return general self‑help suggestions based on issue and severity.
-
-    This function supplies generic recommendations.  For serious
-    symptoms (e.g. severe depression), encourage the user to seek
-    professional help immediately.
-
-    Parameters
-    ----------
-    issue : str
-        Mental‑health issue name.
-    severity : str
-        Severity description.
-
-    Returns
-    -------
-    str
-        Suggested actions or resources.
-    """
-    # Simple mapping; could be expanded with more nuance.
-    suggestions = {
-        "Anxiety": {
-            "Minimal or no anxiety": "Maintain healthy routines and mindfulness.",
-            "Mild anxiety": "Consider stress‑management techniques like deep breathing and regular exercise.",
-            "Moderate anxiety": "Practice cognitive‑behavioural strategies, relaxation techniques, and talk to someone you trust.",
-            "Severe anxiety": "Consult a mental‑health professional. Explore therapy or medication options."
-        },
-        "Stress": {
-            "Low stress": "Keep up your current stress management practices and good self‑care.",
-            "Moderate stress": "Prioritise tasks, set boundaries, and practice relaxation or meditation.",
-            "High stress": "Seek support from friends, family or a counsellor. Develop a stress reduction plan."
-        },
-        "Depression": {
-            "Minimal depression": "Stay active, socialise, and maintain good sleep habits.",
-            "Mild depression": "Engage in enjoyable activities and consider talking to a counsellor.",
-            "Moderate depression": "Reach out to a professional for therapy, and lean on your support network.",
-            "Moderately severe depression": "Seek professional treatment; therapy and possibly medication may be needed.",
-            "Severe depression": "Contact a mental‑health professional urgently. If you feel unsafe, contact emergency services." 
-        }
+CUSTOM_CSS = """
+<style>
+    body {background-color:#0E1117;color:#FAFAFA;}
+    h1,h2,h3,h4,h5,h6 {color:#E0E0E0;}
+    .stButton>button {
+        background: #ff4b4b;
+        color: white;
+        font-weight: 600;
+        border-radius: 999px;
+        padding: 0.5rem 1.5rem;
     }
-    return suggestions.get(issue, {}).get(severity, "No specific suggestions available.")
+    .stButton>button:hover {
+        background: #ff6b6b;
+        color: white;
+    }
+    .risk-low {color:#00e676;font-weight:600;}
+    .risk-moderate {color:#ffeb3b;font-weight:600;}
+    .risk-high {color:#ff9800;font-weight:600;}
+    .risk-critical {color:#ff5252;font-weight:600;}
+    footer {visibility: hidden;}
+</style>
+"""
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-
-def predict_issue(
-    models: dict[str, object],
-    responses: dict[str, list[int]]
-) -> tuple[str, dict[str, float]]:
-    """Predict the most prominent mental‑health issue.
-
-    Each model outputs a probability that the user has the corresponding
-    issue.  The function returns the issue with the highest probability
-    and a dictionary of probabilities per issue.
-
-    Parameters
-    ----------
-    models : dict
-        Mapping of issue names to sklearn/catboost models.
-    responses : dict
-        Mapping of issue names to lists of numeric questionnaire
-        responses.
-
-    Returns
-    -------
-    tuple
-        (predicted issue, probability dict)
-    """
-    probabilities: dict[str, float] = {}
-    for issue, model in models.items():
-        answers = responses.get(issue, [])
-        if not answers:
-            continue
-        # Convert to 2D array for model input
-        features = np.array(answers).reshape(1, -1)
-        try:
-            # Some models (e.g. CatBoost) implement predict_proba
-            prob = model.predict_proba(features)[0, 1]
-        except Exception:
-            # Fall back to decision_function or predict for models
-            # without predict_proba.  The result is scaled to 0–1.
-            try:
-                raw = model.decision_function(features)
-                # Min‑max scale; assume raw outputs range roughly between -inf and +inf
-                prob = 1 / (1 + np.exp(-raw))
-            except Exception:
-                prob = float(model.predict(features)[0])
-        probabilities[issue] = float(prob)
-    # Select issue with maximum probability
-    if probabilities:
-        predicted_issue = max(probabilities, key=probabilities.get)
+# ---------------------------------------------------------------------
+# Utility: scoring from questionnaire totals (no ML)
+# ---------------------------------------------------------------------
+def score_stress(pss_scores):
+    total = float(sum(pss_scores))
+    if total <= 13:
+        label = "Low Perceived Stress"
+    elif total <= 26:
+        label = "Moderate Stress"
     else:
-        predicted_issue = "None"
-    return predicted_issue, probabilities
+        label = "High Perceived Stress"
+    return int(total), label
 
 
-# ----------------------------------------------------------------------
-# Streamlit UI
-# ----------------------------------------------------------------------
+def score_anxiety(gad_scores):
+    total = float(sum(gad_scores))
+    if total <= 4:
+        label = "Minimal Anxiety"
+    elif total <= 9:
+        label = "Mild Anxiety"
+    elif total <= 14:
+        label = "Moderate Anxiety"
+    else:
+        label = "Severe Anxiety"
+    return int(total), label
 
-def main() -> None:
-    """Render the Streamlit application."""
-    st.set_page_config(
-        page_title="Mental Health Assessment System",
-        page_icon="🧠",
-        layout="centered",
-    )
-    st.title("Mental Health Assessment System")
-    st.markdown(
-        "This application helps you self‑assess for anxiety, stress, and depression "
-        "using standard screening questionnaires.  Your responses are processed "
-        "by machine‑learning models to estimate which issue is most prominent "
-        "and provide severity levels and suggestions.\n\n"
-        "**Disclaimer:** This tool is not a clinical diagnosis.  Always consult a "
-        "qualified healthcare provider for professional advice."
-    )
 
-    # Demographic and lifestyle inputs
-    st.header("Basic Information")
-    age_group = st.selectbox(
-        "What is your age group?",
-        ["<18", "18–24", "25–34", "35–44", "45–54", "55+"],
-        index=1,
-    )
-    sleep_quality = st.selectbox(
-        "How would you describe your sleep quality?",
-        ["Excellent", "Good", "Average", "Poor"],
-        index=2,
-    )
-    physical_activity = st.selectbox(
-        "How often do you engage in physical activity (per week)?",
-        ["Rarely", "1–2 times", "3–4 times", "5+ times"],
-        index=1,
-    )
+def score_depression(phq_scores):
+    total = float(sum(phq_scores))
+    if total <= 4:
+        label = "No / Minimal Depression"
+    elif total <= 9:
+        label = "Mild Depression"
+    elif total <= 14:
+        label = "Moderate Depression"
+    elif total <= 19:
+        label = "Moderately Severe Depression"
+    else:
+        label = "Severe Depression"
+    return int(total), label
 
-    # Collect responses for each issue
-    responses: dict[str, list[int]] = {}
-    total_scores: dict[str, int] = {}
-    issues_questions = {
-        "Anxiety": [
-            "Feeling nervous, anxious, or on edge",
-            "Not being able to stop or control worrying",
-            "Worrying too much about different things",
-            "Trouble relaxing",
-            "Being so restless that it is hard to sit still",
-            "Becoming easily annoyed or irritable",
-            "Feeling afraid as if something awful might happen",
-        ],
-        "Stress": [
-            "In the last month, how often have you been upset because of something unexpected?",
-            "In the last month, how often have you felt that you were unable to control the important things in your life?",
-            "In the last month, how often have you felt nervous and stressed?",
-            "In the last month, how often have you felt confident about your ability to handle your personal problems? (reverse scored)",
-            "In the last month, how often have you felt that things were going your way? (reverse scored)",
-            "In the last month, how often have you found that you could not cope with all the things that you had to do?",
-            "In the last month, how often have you been able to control irritations in your life? (reverse scored)",
-            "In the last month, how often have you felt that you were on top of things? (reverse scored)",
-            "In the last month, how often have you been angered because of things that were outside your control?",
-            "In the last month, how often have you felt difficulties were piling up so high that you could not overcome them?",
-        ],
-        "Depression": [
-            "Little interest or pleasure in doing things",
-            "Feeling down, depressed, or hopeless",
-            "Trouble falling or staying asleep, or sleeping too much",
-            "Feeling tired or having little energy",
-            "Poor appetite or overeating",
-            "Feeling bad about yourself — or that you are a failure or have let yourself or your family down",
-            "Trouble concentrating on things, such as reading the newspaper or watching television",
-            "Moving or speaking so slowly that other people could have noticed. Or the opposite — being so fidgety or restless that you have been moving around a lot more than usual",
-            "Thoughts that you would be better off dead, or of hurting yourself in some way",
-        ],
+
+def risk_tier_from_label(label: str) -> str:
+    """Convert severity label to a generic risk tier."""
+    text = label.lower()
+    if "severe" in text:
+        return "Critical"
+    if "high" in text:
+        return "High"
+    if "moderate" in text or "mild" in text:
+        return "Moderate"
+    return "Low"
+
+
+# For ranking which issue is most serious (used with ML outputs)
+STRESS_RANK = {
+    "Low Perceived Stress": 0,
+    "Moderate Stress": 1,
+    "High Perceived Stress": 2,
+}
+ANX_RANK = {
+    "Minimal Anxiety": 0,
+    "Mild Anxiety": 1,
+    "Moderate Anxiety": 2,
+    "Severe Anxiety": 3,
+}
+DEP_RANK = {
+    "No Depression": 0,
+    "Minimal Depression": 1,
+    "Mild Depression": 2,
+    "Moderate Depression": 3,
+    "Moderately Severe Depression": 4,
+    "Severe Depression": 5,
+    "No / Minimal Depression": 1,  # from manual scoring
+}
+
+
+def dominant_issue_from_labels(a_label: str, s_label: str, d_label: str):
+    scores = {
+        "Anxiety": ANX_RANK.get(a_label, 0),
+        "Stress": STRESS_RANK.get(s_label, 0),
+        "Depression": DEP_RANK.get(d_label, 0),
     }
+    best_issue = max(scores, key=scores.get)
+    if all(v == 0 for v in scores.values()):
+        return "None", scores
+    return best_issue, scores
 
-    # Likert scale options for questionnaires (0–3 for GAD/PHQ; 0–4 for PSS)
-    options_gad_phq = {
-        "Not at all": 0,
-        "Several days": 1,
-        "More than half the days": 2,
-        "Nearly every day": 3,
-    }
-    options_pss = {
-        "Never": 0,
-        "Almost never": 1,
-        "Sometimes": 2,
-        "Fairly often": 3,
-        "Very often": 4,
-    }
 
-    # Form for Anxiety questions
-    st.header("Anxiety (GAD‑7)")
-    anxiety_answers: list[int] = []
-    for q in issues_questions["Anxiety"]:
-        response = st.selectbox(q, list(options_gad_phq.keys()), key=f"anx_{q}")
-        anxiety_answers.append(options_gad_phq[response])
-    responses["Anxiety"] = anxiety_answers
-    total_scores["Anxiety"] = sum(anxiety_answers)
+# ---------------------------------------------------------------------
+# ML: load data + train models (once, cached)
+# ---------------------------------------------------------------------
+@st.cache_resource
+def load_data_and_train_models():
+    """
+    Loads Processed.csv and trains three Logistic Regression models (one for
+    Stress, Anxiety, and Depression labels).
 
-    # Form for Stress questions (PSS‑10)
-    st.header("Stress (PSS‑10)")
-    stress_answers: list[int] = []
-    for q in issues_questions["Stress"]:
-        response = st.selectbox(q, list(options_pss.keys()), key=f"str_{q}")
-        score = options_pss[response]
-        # Reverse score items 4, 5, 7, 8 (0<->4, 1<->3) by mapping 0→4, 1→3, 2→2, 3→1, 4→0
-        if "reverse scored" in q:
-            score = 4 - score
-        stress_answers.append(score)
-    responses["Stress"] = stress_answers
-    total_scores["Stress"] = sum(stress_answers)
+    ML is really used here:
+    - Inputs: demographics + PSS/GAD/PHQ items (33 features)
+    - Targets: Stress Label, Anxiety Label, Depression Label
+    """
+    csv_path = "Processed.csv"
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(
+            f"Processed.csv not found in app directory. "
+            f"Please place your dataset at: {os.path.abspath(csv_path)}"
+        )
 
-    # Form for Depression questions (PHQ‑9)
-    st.header("Depression (PHQ‑9)")
-    depression_answers: list[int] = []
-    for q in issues_questions["Depression"]:
-        response = st.selectbox(q, list(options_gad_phq.keys()), key=f"dep_{q}")
-        depression_answers.append(options_gad_phq[response])
-    responses["Depression"] = depression_answers
-    total_scores["Depression"] = sum(depression_answers)
+    df = pd.read_csv(csv_path)
 
-    # Once the user is ready, run prediction
-    if st.button("Assess My Mental Health", type="primary"):
-        st.subheader("Results")
-        # Load models and encoders
-        models = load_models(MODEL_FILES)
-        encoders = load_encoders(ENCODER_FILES)
-        # Predict the most prominent issue
-        pred_issue, probabilities = predict_issue(models, responses)
-        # Display probabilities
-        st.markdown("### Predicted Prominent Issue")
-        if pred_issue == "None":
-            st.write("Unable to determine the most prominent issue from your responses.")
+    # Features used for ML (33 total)
+    feature_cols = (
+        ["Age", "Gender", "University", "Department",
+         "Academic_Year", "Current_CGPA", "waiver_or_scholarship"]
+        + [f"PSS{i}" for i in range(1, 11)]
+        + [f"GAD{i}" for i in range(1, 8)]
+        + [f"PHQ{i}" for i in range(1, 10)]
+    )
+
+    # Categorical vs numeric
+    cat_cols = [
+        "Age", "Gender", "University", "Department",
+        "Academic_Year", "Current_CGPA", "waiver_or_scholarship",
+    ]
+    num_cols = [c for c in feature_cols if c not in cat_cols]
+
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("cat", OneHotEncoder(handle_unknown="ignore"), cat_cols),
+            ("num", StandardScaler(), num_cols),
+        ]
+    )
+
+    models = {}
+    for issue, target_col in [
+        ("Anxiety", "Anxiety Label"),
+        ("Stress", "Stress Label"),
+        ("Depression", "Depression Label"),
+    ]:
+        pipe = Pipeline(
+            steps=[
+                ("preprocess", preprocessor),
+                ("model", LogisticRegression(max_iter=500, multi_class="auto")),
+            ]
+        )
+        pipe.fit(df[feature_cols], df[target_col].astype(str))
+        models[issue] = pipe
+
+    return df, feature_cols, cat_cols, num_cols, models
+
+
+# Try to load + train once
+try:
+    DATAFRAME, FEATURE_COLS, CAT_COLS, NUM_COLS, MODELS = load_data_and_train_models()
+    DATA_READY = True
+except Exception as e:
+    DATA_READY = False
+    DATA_ERROR = str(e)
+
+
+def ml_predict_all(input_row: dict):
+    """Run all three ML models on a single user input row."""
+    sample_df = pd.DataFrame([input_row], columns=FEATURE_COLS)
+    pred_labels = {}
+    pred_probs = {}
+    for issue, model in MODELS.items():
+        proba = model.predict_proba(sample_df)[0]
+        labels = model.classes_
+        label = labels[np.argmax(proba)]
+        pred_labels[issue] = str(label)
+        pred_probs[issue] = dict(zip(labels, proba))
+    return pred_labels, pred_probs
+
+
+# ---------------------------------------------------------------------
+# Sidebar navigation
+# ---------------------------------------------------------------------
+st.sidebar.title("🧭 Navigation")
+page = st.sidebar.radio(
+    "Go to",
+    ["🧩 Assessment", "📊 Dataset Overview"],
+    index=0,
+)
+
+# ---------------------------------------------------------------------
+# PAGE 1 – Assessment
+# ---------------------------------------------------------------------
+if page == "🧩 Assessment":
+    st.title("🧠 Student Mental Health Assessment (Machine Learning-based)")
+    st.caption(
+        "This tool uses **standard questionnaires** (PSS-10, GAD-7, PHQ-9) "
+        "and **Logistic Regression models** trained on real student data."
+    )
+
+    if not DATA_READY:
+        st.error(
+            "❌ Machine-learning backend is not available.\n\n"
+            f"Reason: {DATA_ERROR}"
+        )
+        st.stop()
+
+    # ---------- Options from dataset (ensures perfect match with training) ----
+    age_opts = sorted(DATAFRAME["Age"].dropna().unique().tolist())
+    gender_opts = sorted(DATAFRAME["Gender"].dropna().unique().tolist())
+    uni_opts = sorted(DATAFRAME["University"].dropna().unique().tolist())
+    dept_opts = sorted(DATAFRAME["Department"].dropna().unique().tolist())
+    year_opts = sorted(DATAFRAME["Academic_Year"].dropna().unique().tolist())
+    cgpa_opts = sorted(DATAFRAME["Current_CGPA"].dropna().unique().tolist())
+    waiver_opts = sorted(DATAFRAME["waiver_or_scholarship"].dropna().unique().tolist())
+
+    with st.form("assessment_form"):
+        st.subheader("🎓 Basic Academic Information")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            age = st.selectbox("Age group", age_opts)
+            gender = st.selectbox("Gender", gender_opts)
+        with col2:
+            university = st.selectbox("University type", uni_opts)
+            department = st.selectbox("Department", dept_opts)
+        with col3:
+            academic_year = st.selectbox("Current academic year", year_opts)
+            cgpa = st.selectbox("Current CGPA range", cgpa_opts)
+        waiver = st.selectbox("Waiver / Scholarship status", waiver_opts)
+
+        st.markdown("---")
+        st.subheader("😓 Perceived Stress (PSS-10)")
+        st.caption("Scale 0–4: 0 = Never, 4 = Very Often")
+        pss_scores = []
+        for i in range(1, 11):
+            pss_scores.append(
+                st.slider(
+                    f"PSS{i}",
+                    min_value=0,
+                    max_value=4,
+                    value=2,
+                    step=1,
+                )
+            )
+
+        st.markdown("---")
+        st.subheader("😰 Generalized Anxiety (GAD-7)")
+        st.caption("Scale 0–3: 0 = Not at all, 3 = Nearly every day")
+        gad_scores = []
+        for i in range(1, 8):
+            gad_scores.append(
+                st.slider(
+                    f"GAD{i}",
+                    min_value=0,
+                    max_value=3,
+                    value=1,
+                    step=1,
+                )
+            )
+
+        st.markdown("---")
+        st.subheader("😔 Depressive Symptoms (PHQ-9)")
+        st.caption("Scale 0–3: 0 = Not at all, 3 = Nearly every day")
+        phq_scores = []
+        for i in range(1, 10):
+            phq_scores.append(
+                st.slider(
+                    f"PHQ{i}",
+                    min_value=0,
+                    max_value=3,
+                    value=1,
+                    step=1,
+                )
+            )
+
+        submitted = st.form_submit_button("Assess My Mental Health")
+
+    if submitted:
+        # -----------------------------------------------------------------
+        # 1) Rule-based scoring (official questionnaire thresholds)
+        # -----------------------------------------------------------------
+        stress_total, stress_label_manual = score_stress(pss_scores)
+        anx_total, anx_label_manual = score_anxiety(gad_scores)
+        dep_total, dep_label_manual = score_depression(phq_scores)
+
+        # -----------------------------------------------------------------
+        # 2) Prepare row for ML & run models
+        # -----------------------------------------------------------------
+        input_row = {
+            "Age": age,
+            "Gender": gender,
+            "University": university,
+            "Department": department,
+            "Academic_Year": academic_year,
+            "Current_CGPA": cgpa,
+            "waiver_or_scholarship": waiver,
+        }
+        for i, val in enumerate(pss_scores, start=1):
+            input_row[f"PSS{i}"] = val
+        for i, val in enumerate(gad_scores, start=1):
+            input_row[f"GAD{i}"] = val
+        for i, val in enumerate(phq_scores, start=1):
+            input_row[f"PHQ{i}"] = val
+
+        ml_labels, ml_probs = ml_predict_all(input_row)
+
+        # Use ML labels (not the manual ones) to decide dominant issue
+        dom_issue, dom_scores = dominant_issue_from_labels(
+            ml_labels["Anxiety"], ml_labels["Stress"], ml_labels["Depression"]
+        )
+
+        # -----------------------------------------------------------------
+        # 3) Display results
+        # -----------------------------------------------------------------
+        st.markdown("## 🧾 Results")
+
+        # --- Main conclusion (uses ML models) ---
+        if dom_issue == "None":
+            st.info(
+                "According to the **machine-learning model**, no single mental health "
+                "issue is clearly dominant. However, please review the scores below."
+            )
         else:
-            st.write(f"**{pred_issue}** with probability {probabilities[pred_issue]:.2f}")
-        # Show probability for each issue
-        st.markdown("### Probability by Issue")
-        for issue, prob in probabilities.items():
-            st.write(f"{issue}: {prob:.2f}")
-        # Display severity and suggestions for each issue
-        st.markdown("### Severity and Recommendations")
-        for issue in ["Anxiety", "Stress", "Depression"]:
-            score = total_scores.get(issue, 0)
-            severity = calculate_severity(issue, score)
-            suggestion = get_suggestions(issue, severity)
-            st.write(f"**{issue}** – Total Score: {score}, Severity: {severity}")
-            st.write(f"Recommendation: {suggestion}")
-    # Footer
-    st.markdown("---")
-    st.markdown(
-        "Developed by **Team Dual Core** | This application is for educational purposes only."
+            st.success(
+                f"According to the **machine-learning model trained on student data**, "
+                f"your most prominent challenge appears to be **{dom_issue}**."
+            )
+
+        # --- Detailed per-issue summary (manual + ML label) ---
+        colA, colB, colC = st.columns(3)
+
+        with colA:
+            risk = risk_tier_from_label(ml_labels["Stress"])
+            css = {
+                "Low": "risk-low",
+                "Moderate": "risk-moderate",
+                "High": "risk-high",
+                "Critical": "risk-critical",
+            }.get(risk, "")
+            st.markdown("### 😓 Stress")
+            st.write(f"**PSS-10 Total Score:** {stress_total}")
+            st.write(f"**Questionnaire Category:** {stress_label_manual}")
+            st.write(
+                f"**ML-Predicted Label:** {ml_labels['Stress']} "
+                f"( <span class='{css}'>Risk: {risk}</span> )",
+                unsafe_allow_html=True,
+            )
+
+        with colB:
+            risk = risk_tier_from_label(ml_labels["Anxiety"])
+            css = {
+                "Low": "risk-low",
+                "Moderate": "risk-moderate",
+                "High": "risk-high",
+                "Critical": "risk-critical",
+            }.get(risk, "")
+            st.markdown("### 😰 Anxiety")
+            st.write(f"**GAD-7 Total Score:** {anx_total}")
+            st.write(f"**Questionnaire Category:** {anx_label_manual}")
+            st.write(
+                f"**ML-Predicted Label:** {ml_labels['Anxiety']} "
+                f"( <span class='{css}'>Risk: {risk}</span> )",
+                unsafe_allow_html=True,
+            )
+
+        with colC:
+            risk = risk_tier_from_label(ml_labels["Depression"])
+            css = {
+                "Low": "risk-low",
+                "Moderate": "risk-moderate",
+                "High": "risk-high",
+                "Critical": "risk-critical",
+            }.get(risk, "")
+            st.markdown("### 😔 Depression")
+            st.write(f"**PHQ-9 Total Score:** {dep_total}")
+            st.write(f"**Questionnaire Category:** {dep_label_manual}")
+            st.write(
+                f"**ML-Predicted Label:** {ml_labels['Depression']} "
+                f"( <span class='{css}'>Risk: {risk}</span> )",
+                unsafe_allow_html=True,
+            )
+
+        # --- Suggestions by dominant issue (simple rule-based text) ---
+        st.markdown("---")
+        st.markdown("### 🩺 Brief Self-care Suggestions (Not a diagnosis)")
+
+        if dom_issue == "Stress":
+            st.write(
+                "- Review your **time management** and academic load.\n"
+                "- Practice short **breathing exercises** or **walks** between study blocks.\n"
+                "- Try to maintain regular **sleep** and reduce caffeine late at night."
+            )
+        elif dom_issue == "Anxiety":
+            st.write(
+                "- Use **structured routines** to reduce uncertainty.\n"
+                "- Limit constant checking of marks / social media.\n"
+                "- Consider talking with a **counsellor** if anxiety impacts daily tasks."
+            )
+        elif dom_issue == "Depression":
+            st.write(
+                "- Maintain basic routines: **sleep, food, hygiene**, even if motivation is low.\n"
+                "- Stay connected with at least **one trusted person**.\n"
+                "- If you ever feel unsafe or have self-harm thoughts, seek **immediate professional help**."
+            )
+        else:
+            st.write(
+                "Scores are relatively low. Still, maintaining **healthy habits** "
+                "and monitoring your mood regularly is recommended."
+            )
+
+        st.caption(
+            "⚠️ This tool is **not a clinical diagnosis**. Results are for academic "
+            "and awareness purposes only."
+        )
+
+# ---------------------------------------------------------------------
+# PAGE 2 – Dataset overview (for viva / teachers)
+# ---------------------------------------------------------------------
+elif page == "📊 Dataset Overview":
+    st.title("📊 Dataset & Model Overview")
+
+    if not DATA_READY:
+        st.error(
+            "Dataset / ML models could not be loaded.\n\n"
+            f"Reason: {DATA_ERROR}"
+        )
+        st.stop()
+
+    st.subheader("Dataset Summary")
+    st.write(f"Total records: **{DATAFRAME.shape[0]}**")
+    st.write(f"Total columns: **{DATAFRAME.shape[1]}**")
+
+    st.dataframe(DATAFRAME.head(), use_container_width=True)
+
+    st.markdown("#### Target Label Distribution")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.write("**Stress Label**")
+        st.bar_chart(DATAFRAME["Stress Label"].value_counts())
+    with col2:
+        st.write("**Anxiety Label**")
+        st.bar_chart(DATAFRAME["Anxiety Label"].value_counts())
+    with col3:
+        st.write("**Depression Label**")
+        st.bar_chart(DATAFRAME["Depression Label"].value_counts())
+
+    st.markdown("#### Features used by ML models")
+    st.write(", ".join(FEATURE_COLS))
+
+    st.info(
+        "Each model is a **Logistic Regression** classifier inside a "
+        "scikit-learn `Pipeline` with `ColumnTransformer` (One-Hot Encoding "
+        "for categorical features + StandardScaler for numeric features)."
     )
 
-
-if __name__ == "__main__":
-    main()
+# ---------------------------------------------------------------------
+# Footer – team name
+# ---------------------------------------------------------------------
+st.markdown(
+    """
+---
+**Developed by:** *Mental Health ML Research Team*  
+Department of CSE – Student Mental Health Project (Phase-2)
+""",
+    unsafe_allow_html=True,
+)
