@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-# Import from your unified ML pipeline
+# Import ML functions from your unified pipeline
 from unified_mental_health_pipeline import (
     predict_for_student,
     x_numeric,
@@ -10,26 +10,81 @@ from unified_mental_health_pipeline import (
     dep_clf_num,
 )
 
-# ---------------------------------------------------------
-# PAGE CONFIG
-# ---------------------------------------------------------
-st.set_page_config(
-    page_title="ML-Based Student Mental Health Assessment",
-    layout="wide"
-)
+# ----------------------------------------------------------
+# PAGE SETTINGS
+# ----------------------------------------------------------
+st.set_page_config(page_title="ML Student Mental Health Assessment", layout="wide")
 
 
-# ---------------------------------------------------------
-# SMALL UTILS
-# ---------------------------------------------------------
-def get_top_features(model, cols, top_k=8):
-    """Return top_k features by absolute coefficient from a numeric LR model."""
-    coefs = model.coef_[0]
-    df_feat = pd.DataFrame({"Feature": cols, "Coefficient": coefs})
-    df_feat["Abs"] = df_feat["Coefficient"].abs()
-    return df_feat.sort_values("Abs", ascending=False).head(top_k)
+# ----------------------------------------------------------
+# RISK LEVEL CALCULATION FUNCTIONS
+# ----------------------------------------------------------
+def compute_risk_levels(PSS, GAD, PHQ):
+    pss_total = sum(PSS)     # 0–40
+    gad_total = sum(GAD)     # 0–28 (your dataset uses 0–4 per item)
+    phq_total = sum(PHQ)     # 0–36 (your dataset uses 0–4 per item)
+
+    # Stress (PSS-10)
+    if pss_total <= 13:
+        stress_level = "Low"
+    elif pss_total <= 26:
+        stress_level = "Moderate"
+    else:
+        stress_level = "High"
+
+    # Anxiety (GAD-7 scaled)
+    if gad_total <= 6:
+        anxiety_level = "Minimal"
+    elif gad_total <= 12:
+        anxiety_level = "Mild"
+    elif gad_total <= 19:
+        anxiety_level = "Moderate"
+    else:
+        anxiety_level = "Severe"
+
+    # Depression (PHQ-9 scaled)
+    if phq_total <= 6:
+        depression_level = "Minimal"
+    elif phq_total <= 13:
+        depression_level = "Mild"
+    elif phq_total <= 19:
+        depression_level = "Moderate"
+    elif phq_total <= 25:
+        depression_level = "Moderately Severe"
+    else:
+        depression_level = "Severe"
+
+    return (stress_level, anxiety_level, depression_level,
+            pss_total, gad_total, phq_total)
 
 
+# ----------------------------------------------------------
+# SUGGESTIONS BASED ON RISK LEVEL
+# ----------------------------------------------------------
+def get_suggestions(stress_level, anxiety_level, depression_level):
+    suggestions = []
+
+    if stress_level in ["Moderate", "High"]:
+        suggestions.append("• Break academic tasks into smaller parts to reduce overload.")
+        suggestions.append("• Practice deep breathing during high-pressure moments.")
+
+    if anxiety_level in ["Moderate", "Severe"]:
+        suggestions.append("• Limit caffeine and maintain a regular sleep schedule.")
+        suggestions.append("• Try grounding exercises when worrying becomes intense.")
+
+    if depression_level in ["Moderate", "Moderately Severe", "Severe"]:
+        suggestions.append("• Try maintaining a daily routine with light physical activity.")
+        suggestions.append("• Reach out to a trusted person or counselor when overwhelmed.")
+
+    if not suggestions:
+        suggestions.append("• No major risks detected. Maintain healthy lifestyle habits.")
+
+    return suggestions
+
+
+# ----------------------------------------------------------
+# BUILD STUDENT DATA DICTIONARY FOR ML
+# ----------------------------------------------------------
 def build_student_dict(age, gender, university, department, year, cgpa, scholarship,
                        PSS, GAD, PHQ):
     data = {
@@ -41,270 +96,185 @@ def build_student_dict(age, gender, university, department, year, cgpa, scholars
         "Current_CGPA": cgpa,
         "waiver_or_scholarship": scholarship,
     }
+
     for i in range(10):
         data[f"PSS{i+1}"] = PSS[i]
     for i in range(7):
         data[f"GAD{i+1}"] = GAD[i]
     for i in range(9):
         data[f"PHQ{i+1}"] = PHQ[i]
+
     return data
 
 
-# ---------------------------------------------------------
+# ----------------------------------------------------------
+# XAI Feature Importance Helper
+# ----------------------------------------------------------
+def get_top_features(model, cols, top_k=8):
+    coefs = model.coef_[0]
+    df = pd.DataFrame({"Feature": cols, "Coefficient": coefs})
+    df["Abs"] = df["Coefficient"].abs()
+    return df.sort_values("Abs", ascending=False).head(top_k)
+
+
+# ----------------------------------------------------------
 # MAIN APP
-# ---------------------------------------------------------
+# ----------------------------------------------------------
 def main():
     st.title("🧠 ML-Based Student Mental Health Assessment System")
     st.write(
-        """
-This system uses **Machine Learning** to predict:
-- Anxiety (Present / Absent)  
-- Stress (Present / Absent)  
-- Depression (Present / Absent)  
+        "This system predicts **Anxiety, Stress, Depression**, assigns **risk levels**, "
+        "identifies the **dominant issue**, and provides **suggestions & explainability**."
+    )
+    st.info("⚠️ This is a research tool, not a medical diagnostic system.")
 
-Then it gives an **Overall Mental-Health Status** and basic **Explainable AI** insights.
-        """
-    )
-    st.info(
-        "⚠️ This tool is for **screening & research** only. It does **not** provide "
-        "a clinical diagnosis or treatment."
-    )
     st.markdown("---")
 
-    # -----------------------------------------------------
-    # INPUT FORM
-    # -----------------------------------------------------
-    st.subheader("📋 Student Profile & Questionnaire")
+    # ------------------------------------------------------
+    # INPUT SECTION
+    # ------------------------------------------------------
+    st.subheader("📋 Student Information & Questionnaires")
 
-    with st.form("mh_form"):
+    with st.form("assessment_form"):
+
+        # Basic student info
         col1, col2 = st.columns(2)
-
-        # DEMOGRAPHIC / ACADEMIC
         with col1:
-            st.markdown("### 👤 Demographic & Academic Info")
+            st.markdown("### 🎓 Student Details")
             age = st.number_input("Age", 16, 40, 20)
             gender = st.selectbox("Gender", ["Male", "Female"])
-            university = st.text_input("University", "")
-            department = st.text_input("Department", "")
+            university = st.text_input("University")
+            department = st.text_input("Department")
             year = st.selectbox("Academic Year", ["1st", "2nd", "3rd", "4th"])
-            cgpa = st.number_input("Current CGPA", 0.0, 4.0, 3.0)
+            cgpa = st.number_input("CGPA", 0.0, 4.0, 3.0)
             scholarship = st.selectbox("Scholarship / Waiver", ["Yes", "No"])
 
-            st.markdown("#### Scale for All Questions")
-            st.info(
-                "0 = Never • 1 = Almost Never • 2 = Sometimes • "
-                "3 = Fairly Often • 4 = Very Often"
-            )
+        # Stress section (PSS-10)
+        st.markdown("### 🟦 Stress Assessment (PSS-10)")
+        st.caption("Scale: 0 = Never • 1 = Almost Never • 2 = Sometimes • 3 = Fairly Often • 4 = Very Often")
+        PSS_q = [
+            "Upset due to academic issues",
+            "Unable to control important academic things",
+            "Felt nervous/stressed due to academics",
+            "Couldn't cope with assignments/exams",
+            "Felt confident handling problems (Reverse)",
+            "Things going your way academically (Reverse)",
+            "Controlled irritation from academics (Reverse)",
+            "Felt academic performance was satisfactory (Reverse)",
+            "Felt anger from poor academic outcome",
+            "Academic difficulties piled up beyond control",
+        ]
+        PSS = [st.slider(f"PSS{i+1}: {q}", 0, 4, 1) for i, q in enumerate(PSS_q)]
 
-        # QUESTIONNAIRES
-        with col2:
-            # PSS-10
-            st.markdown("### 🟦 PSS-10 (Stress – Academic Context)")
-            PSS_questions = [
-                "How often did you feel upset due to academic issues?",
-                "How often did you feel unable to control important academic matters?",
-                "How often did academic pressure make you feel nervous or stressed?",
-                "How often did you feel unable to cope with assignments/exams?",
-                "How often did you feel confident in handling university problems? (Reverse)",
-                "How often did you feel things were going well academically? (Reverse)",
-                "How often were you able to control irritation from academic issues? (Reverse)",
-                "How often did you feel your academic performance was satisfactory? (Reverse)",
-                "How often did you feel anger due to poor academic outcomes?",
-                "How often did academic difficulties pile up beyond control?",
-            ]
-            PSS = []
-            for i, q in enumerate(PSS_questions):
-                PSS.append(st.number_input(f"PSS{i+1}: {q}", 0, 4, 1))
+        # Anxiety section (GAD-7)
+        st.markdown("### 🟩 Anxiety Assessment (GAD-7)")
+        GAD_q = [
+            "Nervous or on edge",
+            "Unable to stop worrying",
+            "Trouble relaxing",
+            "Easily annoyed/irritated",
+            "Worrying too much",
+            "Restlessness",
+            "Feeling something bad might happen",
+        ]
+        GAD = [st.slider(f"GAD{i+1}: {q}", 0, 4, 1) for i, q in enumerate(GAD_q)]
 
-            # GAD-7
-            st.markdown("### 🟩 GAD-7 (Anxiety – Academic Context)")
-            GAD_questions = [
-                "How often did you feel nervous or on edge due to academic pressure?",
-                "How often were you unable to stop worrying about academic issues?",
-                "How often did academic pressure stop you from relaxing?",
-                "How often were you easily annoyed or irritated due to academics?",
-                "How often did you worry too much about academic matters?",
-                "How often did restlessness make it hard to sit still due to stress?",
-                "How often did you feel afraid that something bad might happen academically?",
-            ]
-            GAD = []
-            for i, q in enumerate(GAD_questions):
-                GAD.append(st.number_input(f"GAD{i+1}: {q}", 0, 4, 1))
+        # Depression section (PHQ-9)
+        st.markdown("### 🟥 Depression Assessment (PHQ-9)")
+        PHQ_q = [
+            "Little interest or pleasure",
+            "Feeling down/hopeless",
+            "Sleeping issues",
+            "Feeling tired or low energy",
+            "Poor appetite or overeating",
+            "Feeling bad about yourself",
+            "Trouble concentrating",
+            "Moving/speaking slowly/fast",
+            "Thoughts of self-harm (⚠ Serious)",
+        ]
+        PHQ = [st.slider(f"PHQ{i+1}: {q}", 0, 4, 1) for i, q in enumerate(PHQ_q)]
 
-            # PHQ-9
-            st.markdown("### 🟥 PHQ-9 (Depression Symptoms)")
-            PHQ_questions = [
-                "Little interest or pleasure in activities?",
-                "Feeling down, depressed, or hopeless?",
-                "Trouble sleeping (too much or too little)?",
-                "Feeling tired or low energy?",
-                "Poor appetite or overeating?",
-                "Feeling bad about yourself or like a failure?",
-                "Trouble concentrating (study, books, TV)?",
-                "Moving/speaking slower or faster than usual?",
-                "Thoughts of harming yourself or being better off dead?",
-            ]
-            PHQ = []
-            for i, q in enumerate(PHQ_questions):
-                PHQ.append(st.number_input(f"PHQ{i+1}: {q}", 0, 4, 1))
+        submitted = st.form_submit_button("🔍 Run Assessment")
 
-        submitted = st.form_submit_button("🔍 Run ML Assessment")
-
-    # -----------------------------------------------------
-    # VALIDATION & ML PREDICTION
-    # -----------------------------------------------------
-    anx_pred = str_pred = dep_pred = None
-    main_status = None
-    top_anx = top_str = top_dep = None
-
+    # ------------------------------------------------------
+    # RUN ML + SHOW RESULTS
+    # ------------------------------------------------------
     if submitted:
-        # Basic sanity warnings
-        total_pss = sum(PSS)
-        total_gad = sum(GAD)
-        total_phq = sum(PHQ)
 
-        if total_pss == 40 or total_gad == 28 or total_phq == 36:
-            st.warning(
-                "⚠️ All answers are at the maximum (4). This is an extreme pattern "
-                "and may not represent typical student responses."
-            )
+        # Compute risk level from score-based scales
+        stress_level, anxiety_level, depression_level, pss_total, gad_total, phq_total = compute_risk_levels(
+            PSS, GAD, PHQ
+        )
 
-        if university.strip() == "" or department.strip() == "":
-            st.warning("⚠️ University and Department are empty. Please fill them if possible.")
-
-        # Build student dict and run ML
+        # Build dict and run ML prediction
         student_data = build_student_dict(
             age, gender, university, department, year, cgpa, scholarship,
             PSS, GAD, PHQ
         )
 
-        try:
-            anx_pred, str_pred, dep_pred, main_status = predict_for_student(student_data)
-        except Exception as e:
-            st.error(f"Error during ML prediction: {e}")
-            return
+        anx_pred, str_pred, dep_pred, main_status = predict_for_student(student_data)
 
-        # Prepare XAI top features (numeric LR models)
-        try:
-            top_anx = get_top_features(anx_clf_num, x_numeric.columns)
-            top_str = get_top_features(str_clf_num, x_numeric.columns)
-            top_dep = get_top_features(dep_clf_num, x_numeric.columns)
-        except Exception as e:
-            st.warning(f"XAI feature importance could not be computed: {e}")
+        # XAI tables
+        top_anx = get_top_features(anx_clf_num, x_numeric.columns)
+        top_str = get_top_features(str_clf_num, x_numeric.columns)
+        top_dep = get_top_features(dep_clf_num, x_numeric.columns)
 
-    # -----------------------------------------------------
-    # TABS: SIMPLE VIEW / ADVANCED ML VIEW / ABOUT
-    # -----------------------------------------------------
-    tab_simple, tab_advanced, tab_about = st.tabs(
-        ["✅ Simple View", "🔬 Advanced ML View", "ℹ️ About System"]
-    )
+        # ------------------------------------------------------
+        # SIMPLE RESULT VIEW
+        # ------------------------------------------------------
+        st.markdown("## ✅ Results Summary")
 
-    # SIMPLE VIEW
-    with tab_simple:
-        st.subheader("✅ Simple Result View")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("Anxiety (ML)", "Present" if anx_pred == 1 else "Absent")
+        with c2:
+            st.metric("Stress (ML)", "Present" if str_pred == 1 else "Absent")
+        with c3:
+            st.metric("Depression (ML)", "Present" if dep_pred == 1 else "Absent")
 
-        if not submitted:
-            st.info("Submit the form to see predictions.")
-        else:
-            colA, colB, colC = st.columns(3)
-            with colA:
-                st.metric("Anxiety", "Present" if anx_pred == 1 else "Absent")
-            with colB:
-                st.metric("Stress", "Present" if str_pred == 1 else "Absent")
-            with colC:
-                st.metric("Depression", "Present" if dep_pred == 1 else "Absent")
+        st.markdown(f"### 🧠 Dominant Mental-Health Issue: **{main_status}**")
 
-            st.markdown("### 🧠 Overall Mental-Health Status")
-            if main_status:
-                st.success(f"**{main_status}**")
-            else:
-                st.info("Overall status not available.")
+        # ------------------------------------------------------
+        # RISK LEVELS
+        # ------------------------------------------------------
+        st.markdown("## 🎯 Risk Levels (Score-based)")
+        st.write(f"**Stress:** {stress_level} (Score {pss_total}/40)")
+        st.write(f"**Anxiety:** {anxiety_level} (Score {gad_total}/28)")
+        st.write(f"**Depression:** {depression_level} (Score {phq_total}/36)")
 
-            # Short natural-language summary
-            st.markdown("### 📝 Summary (Human-friendly Explanation)")
-            summary_lines = []
-            if anx_pred == 1:
-                summary_lines.append("- Signs of **anxiety** risk are present.")
-            else:
-                summary_lines.append("- No strong pattern of **anxiety** risk detected.")
+        # ------------------------------------------------------
+        # SUGGESTIONS
+        # ------------------------------------------------------
+        st.markdown("## 💡 Suggestions")
+        for s in get_suggestions(stress_level, anxiety_level, depression_level):
+            st.write(s)
 
-            if str_pred == 1:
-                summary_lines.append("- Signs of **stress** risk are present.")
-            else:
-                summary_lines.append("- No strong pattern of **stress** risk detected.")
+        # ------------------------------------------------------
+        # EMERGENCY HELP
+        # ------------------------------------------------------
+        st.markdown("## 🚨 Emergency Support")
+        if PHQ[8] >= 3:  # suicide risk
+            st.error("⚠️ Severe depression pattern detected with self-harm indication. Seek help immediately.")
+        st.write("🇧🇩 Bangladesh Hotline: **09612-119911 (Kaan Pete Roi)**")
+        st.write("🇺🇸 USA Emergency: **988 (Suicide & Crisis Lifeline)**")
 
-            if dep_pred == 1:
-                summary_lines.append("- Signs of **depression** risk are present.")
-            else:
-                summary_lines.append("- No strong pattern of **depression** risk detected.")
+        # ------------------------------------------------------
+        # XAI TABLES
+        # ------------------------------------------------------
+        st.markdown("## 🔬 Explainable AI (Top Influential Features)")
 
-            if main_status:
-                summary_lines.append(f"- Overall, the model identifies: **{main_status}**.")
+        colA, colB, colC = st.columns(3)
+        with colA:
+            st.write("### Anxiety – Top Features")
+            st.dataframe(top_anx)
 
-            st.write("\n".join(summary_lines))
+        with colB:
+            st.write("### Stress – Top Features")
+            st.dataframe(top_str)
 
-    # ADVANCED ML VIEW
-    with tab_advanced:
-        st.subheader("🔬 Advanced ML View (For Internal / Viva)")
-
-        if not submitted:
-            st.info("Run the assessment first to see ML details.")
-        else:
-            st.markdown("#### 1️⃣ Raw Predictions (0/1 flags)")
-            st.write(
-                f"- Anxiety flag: `{anx_pred}`  (1 = Present, 0 = Absent)\n"
-                f"- Stress flag: `{str_pred}`\n"
-                f"- Depression flag: `{dep_pred}`"
-            )
-
-            st.markdown("#### 2️⃣ Explainable AI – Top Numeric Features")
-            st.write(
-                "These tables show the most influential **numeric** features based on "
-                "logistic regression coefficients from numeric-only models."
-            )
-
-            if top_anx is not None and top_str is not None and top_dep is not None:
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    st.write("##### 🔵 Anxiety – Top Features")
-                    st.dataframe(top_anx[["Feature", "Coefficient"]])
-                with c2:
-                    st.write("##### 🟡 Stress – Top Features")
-                    st.dataframe(top_str[["Feature", "Coefficient"]])
-                with c3:
-                    st.write("##### 🔴 Depression – Top Features")
-                    st.dataframe(top_dep[["Feature", "Coefficient"]])
-            else:
-                st.info("XAI tables not available.")
-
-            st.markdown("#### 3️⃣ Notes on Model Design (You can say this in viva)")
-            st.markdown(
-                """
-- We use **Logistic Regression** with `class_weight='balanced'` to handle class imbalance.  
-- **Preprocessing:** Categorical features → OneHotEncoder, numeric features → StandardScaler.  
-- Dataset split: **80% train, 20% test** (or similar, depending on version).  
-- We trained **three independent binary classifiers** for Anxiety, Stress, and Depression.  
-- Then we derived an **Overall Mental-Health Status** (dominant condition) from the three outputs.  
-- For explainability, we trained **numeric-only LR models** and used coefficients as feature importance.
-                """
-            )
-
-    # ABOUT TAB
-    with tab_about:
-        st.subheader("ℹ️ About This System")
-        st.write(
-            """
-This application is part of a **thesis research project** on student mental health:
-
-- **Goal:** Early detection of anxiety, stress, and depression risk patterns among university students.  
-- **Data:** Demographic + academic info + validated questionnaires (PSS-10, GAD-7, PHQ-9).  
-- **Methods:** Supervised machine learning (Logistic Regression) with proper preprocessing pipelines.  
-- **Output:** Binary risk predictions + overall dominant issue + basic model explainability.
-
-It is **not a clinical tool**, but a **screening and research prototype** to support mental-health awareness
-and future intervention design.
-            """
-        )
+        with colC:
+            st.write("### Depression – Top Features")
+            st.dataframe(top_dep)
 
 
 if __name__ == "__main__":
