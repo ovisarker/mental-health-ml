@@ -237,7 +237,7 @@ def main():
         # ------------------------------------------------------
         # RISK LEVELS
         # ------------------------------------------------------
-        st.markdown("## 🎯 Risk Levels (Score-based)")
+        st.markdown("## 🎯 Risk Levels ")
         st.write(f"**Stress:** {stress_level} (Score {pss_total}/40)")
         st.write(f"**Anxiety:** {anxiety_level} (Score {gad_total}/28)")
         st.write(f"**Depression:** {depression_level} (Score {phq_total}/36)")
