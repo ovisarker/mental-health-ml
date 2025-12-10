@@ -256,7 +256,7 @@ def main():
         if PHQ[8] >= 3:  # suicide risk
             st.error("⚠️ Severe depression pattern detected with self-harm indication. Seek help immediately.")
         st.write("🇧🇩 Bangladesh Hotline: **09612-119911 (Kaan Pete Roi)**")
-        st.write("🇺🇸 USA Emergency: **988 (Suicide & Crisis Lifeline)**")
+        st.write("BD Emergency: **999 (BD POLICE)**")
 
         # ------------------------------------------------------
         # XAI TABLES
