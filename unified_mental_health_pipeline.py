@@ -7,10 +7,9 @@
 # - Overall Mental Health Status (main issue)
 # - Basic XAI: numeric feature importance (Logistic Regression)
 #
-# NOTE:
-#   - Requires 'Processed.csv' in the same folder.
-#   - Columns assumed: demographic + PSS1–PSS10, GAD1–GAD7, PHQ1–PHQ9,
-#     'Depression Label', (optionally 'Depression Value') etc.
+# Requires:
+#   - Processed.csv in the same folder
+#   - app.py in same folder (for Streamlit)
 
 import pandas as pd
 import numpy as np
@@ -208,12 +207,13 @@ def predict_for_student(new_student_dict: dict):
     return anx_pred, str_pred, dep_pred, main_issue
 
 # ---------------------------------------------------------
-# STEP 11: Basic XAI – numeric-only LR models
+# STEP 11: Basic XAI – numeric-only LR models (with safe numeric handling)
 # ---------------------------------------------------------
 print("\n🔹 Training numeric-only LR models for basic XAI ...")
 
 # numeric-only subset for simple interpretability
-x_numeric = df[numeric_cols].copy()
+# convert everything to numeric, non-numeric -> NaN
+x_numeric = df[numeric_cols].apply(pd.to_numeric, errors="coerce")
 
 Xn_train, Xn_test, yn_anx_train, yn_anx_test, yn_str_train, yn_str_test, yn_dep_train, yn_dep_test = train_test_split(
     x_numeric, y_anx, y_str, y_dep,
@@ -223,8 +223,17 @@ Xn_train, Xn_test, yn_anx_train, yn_anx_test, yn_str_train, yn_str_test, yn_dep_
 )
 
 def train_lr_numeric(X_train_num, y_train_num):
+    """
+    Train a simple Logistic Regression only on numeric features
+    for interpretability (feature importance via coefficients).
+    """
+    # ensure numeric and handle NaN
+    X_train_num = X_train_num.apply(pd.to_numeric, errors="coerce")
+    X_train_num = X_train_num.fillna(0.0)
+
     scaler = StandardScaler()
     Xs = scaler.fit_transform(X_train_num)
+
     clf = LogisticRegression(
         class_weight="balanced",
         max_iter=1000,
