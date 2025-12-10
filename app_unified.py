@@ -1,311 +1,249 @@
+# =====================================
+# app.py — Professional Streamlit App
+# Unified Mental-Health Prediction System
+# =====================================
+
 import streamlit as st
 import pandas as pd
+import datetime
+import os
 import numpy as np
+import shap
+import matplotlib.pyplot as plt
 
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, classification_report
+from predict_all import predict_all, anxiety_model, stress_model, depression_model
 
+st.set_page_config(
+    page_title="AI Mental Health Assessment",
+    layout="wide",
+    page_icon="🧠"
+)
 
-# =========================
-# 1) DATA LOAD + MODEL TRAIN
-# =========================
-@st.cache_resource
-def train_models():
-    # ---- Load dataset ----
-    df = pd.read_csv("Updated Processed Diu.csv")
+st.title("🧠 AI-Powered Mental Health Assessment System")
+st.markdown("""
+This tool predicts **Anxiety, Stress, and Depression** using Machine Learning models  
+trained on validated psychometric scales (**PSS-10, GAD-7, PHQ-9**).
+""")
+st.info("Fill in your information and questionnaire responses to receive AI-assisted screening. This is **not** a clinical diagnosis tool.")
 
-    # ---- Create labels ----
-    # Depression_Binary from "Depression Label"
-    if "Depression_Binary" not in df.columns:
-        df["Depression_Binary"] = df["Depression Label"].apply(
-            lambda x: 0 if str(x).strip().lower() == "no depression" else 1
+# ------------------------------
+# Sidebar – User Info
+# ------------------------------
+st.sidebar.header("📌 Basic Information")
+
+age = st.sidebar.selectbox("Age", ["18-22", "23-27", "28-32", "33+"])
+gender = st.sidebar.selectbox("Gender", ["Male", "Female", "Other"])
+university = st.sidebar.text_input("University Name")
+department = st.sidebar.text_input("Department")
+academic_year = st.sidebar.selectbox(
+    "Academic Year",
+    ["1st Year", "2nd Year", "3rd Year", "4th Year"]
+)
+cgpa = st.sidebar.selectbox(
+    "Current CGPA",
+    ["<2.50", "2.50-3.00", "3.00-3.50", "3.50-4.00"]
+)
+scholarship = st.sidebar.selectbox(
+    "Scholarship/Waiver",
+    ["No", "Yes - Partial", "Yes - Full"]
+)
+
+# ------------------------------
+# Questionnaire Tabs
+# ------------------------------
+tab1, tab2, tab3 = st.tabs(["🟨 PSS-10 (Stress)", "🟦 GAD-7 (Anxiety)", "🟥 PHQ-9 (Depression)"])
+
+# --- PSS-10 (0–4) ---
+pss_questions = [
+    "How often did you feel upset due to academic issues?",
+    "How often did you feel unable to control important academic matters?",
+    "How often did academic pressure make you feel nervous or stressed?",
+    "How often did you feel unable to cope with academic tasks (assignments, quizzes, exams)?",
+    "How often did you feel confident in handling university-related problems? (Reverse scored)",
+    "How often did you feel that things were going your way academically? (Reverse scored)",
+    "How often were you able to control irritations caused by academic issues? (Reverse scored)",
+    "How often did you feel your academic performance was satisfactory? (Reverse scored)",
+    "How often did you feel anger due to poor academic outcomes beyond your control?",
+    "How often did academic difficulties pile up so high that you could not overcome them?"
+]
+
+with tab1:
+    st.subheader("Perceived Stress Scale (PSS-10)")
+    st.caption("Scale: 0 = Never, 1 = Almost Never, 2 = Sometimes, 3 = Fairly Often, 4 = Very Often")
+    pss = {}
+    for i, q in enumerate(pss_questions, start=1):
+        pss[f"PSS{i}"] = st.slider(q, 0, 4, 0)
+
+# --- GAD-7 (0–3) ---
+gad_questions = [
+    "Feeling nervous, anxious, or on edge because of academic pressure?",
+    "Not being able to stop or control worrying about academic issues?",
+    "Worrying too much about different university-related things?",
+    "Trouble relaxing due to academic stress?",
+    "Being so restless that it's hard to sit still when thinking about studies?",
+    "Becoming easily annoyed or irritable because of academic workload?",
+    "Feeling afraid as if something awful might happen academically?"
+]
+
+with tab2:
+    st.subheader("Generalized Anxiety Disorder (GAD-7)")
+    st.caption("Scale: 0 = Not at all, 1 = Several days, 2 = More than half the days, 3 = Nearly every day")
+    gad = {}
+    for i, q in enumerate(gad_questions, start=1):
+        gad[f"GAD{i}"] = st.slider(q, 0, 3, 0)
+
+# --- PHQ-9 (0–3) ---
+phq_questions = [
+    "Little interest or pleasure in doing things?",
+    "Feeling down, depressed, or hopeless?",
+    "Trouble falling or staying asleep, or sleeping too much?",
+    "Feeling tired or having little energy?",
+    "Poor appetite or overeating?",
+    "Feeling bad about yourself or that you are a failure?",
+    "Trouble concentrating on reading, studies, or watching something?",
+    "Moving or speaking so slowly that others noticed — or the opposite, being fidgety or restless?",
+    "Thoughts that you would be better off dead, or of hurting yourself in some way?"
+]
+
+with tab3:
+    st.subheader("Patient Health Questionnaire (PHQ-9)")
+    st.caption("Scale: 0 = Not at all, 1 = Several days, 2 = More than half the days, 3 = Nearly every day")
+    phq = {}
+    for i, q in enumerate(phq_questions, start=1):
+        phq[f"PHQ{i}"] = st.slider(q, 0, 3, 0)
+
+st.markdown("---")
+
+# ------------------------------
+# Predict Button
+# ------------------------------
+if st.button("🔍 Run AI Prediction"):
+
+    # Build user dict in correct format for model
+    user_input = {
+        "Age": age,
+        "Gender": gender,
+        "University": university,
+        "Department": department,
+        "Academic_Year": academic_year,
+        "Current_CGPA": cgpa,
+        "waiver_or_scholarship": scholarship
+    }
+    user_input.update(pss)
+    user_input.update(gad)
+    user_input.update(phq)
+
+    # Run unified prediction
+    result = predict_all(user_input)
+
+    # Color helper
+    def colored_box(text, color):
+        st.markdown(
+            f"""
+            <div style="background-color:{color};padding:15px;border-radius:10px;
+                        margin:5px 0;font-size:18px;">
+                {text}
+            </div>
+            """,
+            unsafe_allow_html=True
         )
 
-    # Anxiety_Binary from GAD1–GAD7
-    gad_cols = [c for c in df.columns if c.startswith("GAD")]
-    df["GAD_Total"] = df[gad_cols].sum(axis=1)
-    df["Anxiety_Binary"] = df["GAD_Total"].apply(lambda v: 0 if v <= 4 else 1)
+    st.subheader("📊 AI Prediction Results")
 
-    # Stress_Binary from PSS1–PSS10
-    pss_cols = [c for c in df.columns if c.startswith("PSS")]
-    df["PSS_Total"] = df[pss_cols].sum(axis=1)
-    df["Stress_Binary"] = df["PSS_Total"].apply(lambda v: 0 if v <= 13 else 1)
+    if "High" in result["Anxiety"]:
+        colored_box(f"😰 Anxiety: <b>{result['Anxiety']}</b>", "#ffcccc")
+    else:
+        colored_box(f"😌 Anxiety: <b>{result['Anxiety']}</b>", "#d4ffd4")
 
-    # ---- Drop target-related columns from features ----
-    drop_cols = [
-        "Depression Label",
-        "Depression Value",
-        "Depression_Binary",
-        "Anxiety_Binary",
-        "Stress_Binary",
-        "GAD_Total",
-        "PSS_Total",
-    ]
-    drop_cols = [c for c in drop_cols if c in df.columns]
+    if "High" in result["Stress"]:
+        colored_box(f"😓 Stress: <b>{result['Stress']}</b>", "#ffebcc")
+    else:
+        colored_box(f"😌 Stress: <b>{result['Stress']}</b>", "#d4ffd4")
 
-    X = df.drop(columns=drop_cols)
-    y_anx = df["Anxiety_Binary"]
-    y_str = df["Stress_Binary"]
-    y_dep = df["Depression_Binary"]
+    if "Present" in result["Depression"]:
+        colored_box(f"😞 Depression: <b>{result['Depression']}</b>", "#ffd6d6")
+    else:
+        colored_box(f"🙂 Depression: <b>{result['Depression']}</b>", "#d4ffd4")
 
-    # ---- Categorical / Numeric detection ----
-    categorical_cols = X.select_dtypes(include=["object"]).columns.tolist()
-    numeric_cols = X.select_dtypes(exclude=["object"]).columns.tolist()
+    # ------------------------------
+    # Save Log
+    # ------------------------------
+    log_entry = user_input.copy()
+    log_entry.update(result)
+    log_entry["Timestamp"] = str(datetime.datetime.now())
 
-    # ---- Preprocessor ----
-    categorical_transformer = OneHotEncoder(handle_unknown="ignore")
-    numeric_transformer = StandardScaler()
+    log_df = pd.DataFrame([log_entry])
 
-    preprocessor = ColumnTransformer(
-        transformers=[
-            ("cat", categorical_transformer, categorical_cols),
-            ("num", numeric_transformer, numeric_cols),
+    if not os.path.exists("prediction_logs.csv"):
+        log_df.to_csv("prediction_logs.csv", index=False)
+    else:
+        log_df.to_csv("prediction_logs.csv", index=False, mode="a", header=False)
+
+    st.success("✅ Prediction saved to log file successfully.")
+
+    st.download_button(
+        label="⬇ Download This Result (CSV)",
+        data=log_df.to_csv(index=False),
+        file_name="mh_prediction_result.csv",
+        mime="text/csv"
+    )
+
+    # ==========================================
+    # 🔍 Basic SHAP Explainability (Depression)
+    # ==========================================
+    st.markdown("---")
+    st.markdown("## 🧩 Explainability – Which factors affect Depression prediction?")
+
+    try:
+        # Load background data from Processed.csv
+        bg_df = pd.read_csv("Processed.csv")
+        bg_df.columns = bg_df.columns.str.strip()
+
+        # Drop leakage/label cols same as training
+        drop_cols = [
+            "Stress Value", "Stress Label",
+            "Anxiety Value", "Anxiety Label",
+            "Depression Value", "Depression Label",
+            "GAD_Total", "PSS_Total",
+            "Depression_Binary", "Anxiety_Binary", "Stress_Binary"
         ]
-    )
+        drop_cols = list(set(drop_cols).intersection(set(bg_df.columns)))
+        X_bg = bg_df.drop(columns=drop_cols)
 
-    # ---- Base classifier (same for all 3) ----
-    def make_clf():
-        return LogisticRegression(
-            class_weight="balanced", max_iter=1000, solver="liblinear"
+        # Use a small sample for speed
+        X_bg_sample = X_bg.sample(min(200, len(X_bg)), random_state=42)
+
+        # Get preprocessor & classifier from pipeline
+        preprocessor = depression_model.named_steps["preprocess"]
+        clf_dep = depression_model.named_steps["classifier"]
+
+        # Transform background data
+        X_bg_trans = preprocessor.transform(X_bg_sample)
+
+        # Get feature names after preprocessing
+        cat_cols = preprocessor.transformers_[0][2]
+        num_cols = preprocessor.transformers_[1][2]
+        ohe = preprocessor.transformers_[0][1]
+        cat_feature_names = ohe.get_feature_names_out(cat_cols)
+        all_feature_names = np.concatenate([cat_feature_names, num_cols])
+
+        # Build SHAP Explainer (tree-based)
+        explainer_dep = shap.TreeExplainer(clf_dep)
+        shap_values = explainer_dep.shap_values(X_bg_trans)
+
+        st.caption("Global SHAP summary: features with higher absolute SHAP values have stronger influence on Depression risk.")
+
+        fig, ax = plt.subplots(figsize=(8, 5))
+        # For binary classifier, use class 1 SHAP values
+        shap.summary_plot(
+            shap_values[1] if isinstance(shap_values, list) else shap_values,
+            X_bg_trans,
+            feature_names=all_feature_names,
+            show=False
         )
+        st.pyplot(fig)
+        plt.clf()
 
-    # One common split for all models
-    X_train, X_test, y_anx_train, y_anx_test = train_test_split(
-        X, y_anx, test_size=0.2, random_state=42, stratify=y_anx
-    )
-    _, _, y_str_train, y_str_test = train_test_split(
-        X, y_str, test_size=0.2, random_state=42, stratify=y_str
-    )
-    _, _, y_dep_train, y_dep_test = train_test_split(
-        X, y_dep, test_size=0.2, random_state=42, stratify=y_dep
-    )
-
-    # ---- Build 3 pipelines ----
-    anxiety_model = Pipeline(
-        steps=[("preprocess", preprocessor), ("clf", make_clf())]
-    )
-    stress_model = Pipeline(
-        steps=[("preprocess", preprocessor), ("clf", make_clf())]
-    )
-    depression_model = Pipeline(
-        steps=[("preprocess", preprocessor), ("clf", make_clf())]
-    )
-
-    # ---- Train models ----
-    anxiety_model.fit(X_train, y_anx_train)
-    stress_model.fit(X_train, y_str_train)
-    depression_model.fit(X_train, y_dep_train)
-
-    # ---- Quick metrics (console print) ----
-    for name, model, yt in [
-        ("Anxiety", anxiety_model, y_anx_test),
-        ("Stress", stress_model, y_str_test),
-        ("Depression", depression_model, y_dep_test),
-    ]:
-        y_pred = model.predict(X_test)
-        acc = accuracy_score(yt, y_pred)
-        print(f"{name} Accuracy: {acc:.3f}")
-        print(classification_report(yt, y_pred, digits=3))
-
-    return anxiety_model, stress_model, depression_model, X.columns.tolist()
-
-
-# =========================
-# 2) QUESTION TEXT + MAPPING
-# =========================
-
-PSS_QUESTIONS = {
-    "PSS1": "In a semester, how often have you felt upset due to something that happened in your academic affairs?",
-    "PSS2": "In a semester, how often you felt as if you were unable to control important things in your academic affairs?",
-    "PSS3": "In a semester, how often you felt nervous and stressed because of academic pressure?",
-    "PSS4": "In a semester, how often you felt as if you could not cope with all the mandatory academic activities?",
-    "PSS5": "In a semester, how often you felt confident about your ability to handle your academic / university problems?",
-    "PSS6": "In a semester, how often you felt as if things in your academic life is going your way?",
-    "PSS7": "In a semester, how often are you able to control irritations in your academic / university affairs?",
-    "PSS8": "In a semester, how often you felt as if your academic performance was on top?",
-    "PSS9": "In a semester, how often you got angered due to bad performance or low grades that are beyond your control?",
-    "PSS10": "In a semester, how often you felt as if academic difficulties are piling up so high that you could not overcome them?",
-}
-
-GAD_QUESTIONS = {
-    "GAD1": "In a semester, how often you felt nervous, anxious or on edge due to academic pressure?",
-    "GAD2": "In a semester, how often have you been unable to stop worrying about your academic affairs?",
-    "GAD3": "In a semester, how often have you had trouble relaxing due to academic pressure?",
-    "GAD4": "In a semester, how often have you been easily annoyed or irritated because of academic pressure?",
-    "GAD5": "In a semester, how often have you worried too much about academic affairs?",
-    "GAD6": "In a semester, how often have you been so restless due to academic pressure that it is hard to sit still?",
-    "GAD7": "In a semester, how often have you felt afraid, as if something awful might happen?",
-}
-
-PHQ_QUESTIONS = {
-    "PHQ1": "In a semester, how often have you had little interest or pleasure in doing things?",
-    "PHQ2": "In a semester, how often have you been feeling down, depressed or hopeless?",
-    "PHQ3": "In a semester, how often have you had trouble falling or staying asleep, or sleeping too much?",
-    "PHQ4": "In a semester, how often have you been feeling tired or having little energy?",
-    "PHQ5": "In a semester, how often have you had poor appetite or overeating?",
-    "PHQ6": "In a semester, how often have you been feeling bad about yourself or that you are a failure?",
-    "PHQ7": "In a semester, how often have you been having trouble concentrating on things (e.g., reading books)?",
-    "PHQ8": "In a semester, how often have you moved or spoken so slowly that other people noticed, or been very restless?",
-    "PHQ9": "In a semester, how often have you had thoughts that you would be better off dead, or of hurting yourself?",
-}
-
-# PSS scale (0–4)
-PSS_OPTIONS = {
-    "Never": 0,
-    "Almost never": 1,
-    "Sometimes": 2,
-    "Fairly often": 3,
-    "Very often": 4,
-}
-
-# GAD / PHQ scale (0–3)
-GAD_PHQ_OPTIONS = {
-    "Not at all": 0,
-    "Several days": 1,
-    "More than half the days": 2,
-    "Nearly every day": 3,
-}
-
-
-# =========================
-# 3) STREAMLIT UI
-# =========================
-def main():
-    st.title("Student Mental Health Prediction System (Anxiety, Stress, Depression)")
-
-    st.markdown(
-        """
-This app takes **demographic info + PSS-10 + GAD-7 + PHQ-9** responses and
-uses **machine learning** models (trained on real student data) to classify:
-
-- Anxiety: Present / Not present  
-- Stress: Present / Not present  
-- Depression: Present / Not present  
-"""
-    )
-
-    # Train or load models
-    with st.spinner("Training ML models from dataset... (only once)"):
-        anxiety_model, stress_model, depression_model, feature_cols = train_models()
-
-    st.success("Models ready ✅")
-
-    # ------------- Demographic Inputs -------------
-    st.header("1. Demographic & Academic Information")
-
-    age = st.selectbox(
-        "Age range",
-        ["18-20", "21-23", "24-26", "27+"],
-    )
-    gender = st.selectbox("Gender", ["Male", "Female", "Other"])
-    university = st.text_input("University", "Daffodil International University")
-    department = st.text_input("Department", "CSE")
-    academic_year = st.selectbox(
-        "Academic Year",
-        ["1st", "2nd", "3rd", "4th", "Other"],
-    )
-    current_cgpa = st.selectbox(
-        "Current CGPA range",
-        ["<2.50", "2.50-2.99", "3.00-3.49", "3.50-4.00"],
-    )
-    waiver = st.selectbox(
-        "Did you receive a waiver or scholarship?",
-        ["No", "Yes (partial)", "Yes (full)"],
-    )
-
-    # ------------- PSS-10 -------------
-    st.header("2. Perceived Stress Scale (PSS-10) – Academic Context")
-    pss_answers = {}
-    for code, q in PSS_QUESTIONS.items():
-        ans = st.radio(q, list(PSS_OPTIONS.keys()), key=code)
-        pss_answers[code] = PSS_OPTIONS[ans]
-
-    # ------------- GAD-7 -------------
-    st.header("3. Generalized Anxiety (GAD-7) – Academic Context")
-    gad_answers = {}
-    for code, q in GAD_QUESTIONS.items():
-        ans = st.radio(q, list(GAD_PHQ_OPTIONS.keys()), key=code)
-        gad_answers[code] = GAD_PHQ_OPTIONS[ans]
-
-    # ------------- PHQ-9 -------------
-    st.header("4. Depression (PHQ-9) – Academic Context")
-    phq_answers = {}
-    for code, q in PHQ_QUESTIONS.items():
-        ans = st.radio(q, list(GAD_PHQ_OPTIONS.keys()), key=code)
-        phq_answers[code] = GAD_PHQ_OPTIONS[ans]
-
-    if st.button("🔍 Predict Mental Health Status"):
-        # Build a single-row DataFrame with same column names as training data
-        # ধরে নিচ্ছি dataset এ column নামগুলি এগুলোর মত:
-        input_dict = {
-            "Age": age,
-            "Gender": gender,
-            "University": university,
-            "Department": department,
-            "Academic_Year": academic_year,
-            "Current_CGPA": current_cgpa,
-            "waiver_or_scholarship": waiver,
-        }
-
-        # Add PSS/GAD/PHQ numeric answers
-        input_dict.update(pss_answers)
-        input_dict.update(gad_answers)
-        input_dict.update(phq_answers)
-
-        # Make sure all model feature columns exist in this row
-        # যদি dataset এ আরও কিছু extra feature থাকে, সেগুলো default NaN হবে
-        full_input = {col: input_dict.get(col, np.nan) for col in feature_cols}
-        user_df = pd.DataFrame([full_input])
-
-        # Predict using 3 separate models
-        anx_pred = anxiety_model.predict(user_df)[0]
-        str_pred = stress_model.predict(user_df)[0]
-        dep_pred = depression_model.predict(user_df)[0]
-
-        anx_proba = anxiety_model.predict_proba(user_df)[0][1]
-        str_proba = stress_model.predict_proba(user_df)[0][1]
-        dep_proba = depression_model.predict_proba(user_df)[0][1]
-
-        st.subheader("✅ Prediction Results (ML Classification)")
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            st.markdown(
-                f"""
-**Anxiety**  
-Prediction: `{"Present" if anx_pred == 1 else "Not Present"}`  
-Risk score (ML probability): **{anx_proba:.2f}**
-"""
-            )
-
-        with col2:
-            st.markdown(
-                f"""
-**Stress**  
-Prediction: `{"Present" if str_pred == 1 else "Not Present"}`  
-Risk score (ML probability): **{str_proba:.2f}**
-"""
-            )
-
-        with col3:
-            st.markdown(
-                f"""
-**Depression**  
-Prediction: `{"Present" if dep_pred == 1 else "Not Present"}`  
-Risk score (ML probability): **{dep_proba:.2f}**
-"""
-            )
-
-        st.info(
-            "Note: These results are generated by **machine learning models** "
-            "trained on real student data (PSS-10, GAD-7, PHQ-9 + demographics) – "
-            "this is not just manual score summation."
-        )
-
-
-if __name__ == "__main__":
-    main()
+    except Exception as e:
+        st.warning(f"SHAP explanation could not be generated: {e}")
+        st.caption("Make sure 'Processed.csv' and the trained depression model are available.")
