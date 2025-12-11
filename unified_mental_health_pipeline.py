@@ -1,99 +1,82 @@
 """
-Unified Mental Health Pipeline (Fixed Version)
---------------------------------------------
-This module trains three independent binary classifiers to predict the presence of anxiety,
-stress and depression among students based on questionnaire responses, demographic and
-lifestyle features. It then derives an overall mental-health status (dominant condition)
-from those predictions and includes a basic explainability component using feature
-importance of numeric-only logistic regression models.
+Unified Mental Health Pipeline
+------------------------------
+- Loads Processed.csv
+- Builds binary labels for Anxiety, Stress, Depression
+- Trains 3 Logistic Regression models (with preprocessing)
+- Provides:
+    - predict_for_student(student_dict)
+    - risk_levels_for_student(student_dict)
+    - determine_main_issue(anx, stress, dep)
+    - x_numeric, anx_clf_num, str_clf_num, dep_clf_num (for XAI)
 
-Changes from previous versions:
-  * Uses SimpleImputer to fill missing values in both categorical and numeric features before
-    encoding and scaling. This prevents issues where OneHotEncoder encountered NaN values and
-    triggered a TypeError with np.isnan.
-  * Safe numeric conversion and fillna in the XAI section to avoid casting errors.
-
-To use:
-  1. Place this file in the same folder as your Streamlit `app.py` and `Processed.csv` data.
-  2. Import the functions `predict_for_student`, `determine_main_issue`, and the XAI models
-     (`anx_clf_num`, `str_clf_num`, `dep_clf_num`, `x_numeric`) from this module in your
-     Streamlit app.
+NOTE: Make sure Processed.csv is in the same folder.
 """
 
 import pandas as pd
 import numpy as np
 
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.impute import SimpleImputer
-
-
-# -------------------------------------------------------
-# STEP 1 — Load Dataset
-# -------------------------------------------------------
-print("🔹 Loading dataset from Processed.csv ...")
-df = pd.read_csv("Processed.csv")
-print("Dataset shape:", df.shape)
-
+from sklearn.linear_model import LogisticRegression
 
 # -------------------------------------------------------
-# STEP 2 — Create Binary Labels
+# STEP 1 — Load dataset
+# -------------------------------------------------------
+DATA_PATH = "Processed.csv"  # change if needed
+
+df = pd.read_csv(DATA_PATH)
+
+# -------------------------------------------------------
+# STEP 2 — Create binary labels
 # -------------------------------------------------------
 
-def make_depression_binary(label: str) -> int:
-    """Convert depression label to binary (0 = No Depression, 1 = otherwise)."""
-    if isinstance(label, str) and label.strip().lower() == "no depression":
-        return 0
-    return 1
+# 2.1 Depression_Binary
+if "Depression Label" in df.columns:
+    def _dep_binary(val):
+        if isinstance(val, str) and val.strip().lower() == "no depression":
+            return 0
+        return 1
+    df["Depression_Binary"] = df["Depression Label"].apply(_dep_binary)
+else:
+    # Fallback: use PHQ total
+    phq_cols = [c for c in df.columns if c.upper().startswith("PHQ")]
+    df["PHQ_Total"] = df[phq_cols].sum(axis=1)
+    df["Depression_Binary"] = (df["PHQ_Total"] >= 7).astype(int)
 
-# Derive binary targets
-df["Depression_Binary"] = df["Depression Label"].apply(make_depression_binary)
-
-# Anxiety: GAD total score cutoff
+# 2.2 Anxiety_Binary from GAD
 gad_cols = [c for c in df.columns if c.upper().startswith("GAD")]
-df["GAD_Total"] = df[gad_cols].sum(axis=1)
-df["Anxiety_Binary"] = df["GAD_Total"].apply(lambda x: 0 if x <= 4 else 1)
+if gad_cols:
+    df["GAD_Total"] = df[gad_cols].sum(axis=1)
+    # cut-off based on 0–4 scale: <=4 no anxiety, >=5 anxiety
+    df["Anxiety_Binary"] = (df["GAD_Total"] > 4).astype(int)
+else:
+    df["Anxiety_Binary"] = 0  # fallback
 
-# Stress: PSS total score cutoff
+# 2.3 Stress_Binary from PSS
 pss_cols = [c for c in df.columns if c.upper().startswith("PSS")]
-df["PSS_Total"] = df[pss_cols].sum(axis=1)
-df["Stress_Binary"] = df["PSS_Total"].apply(lambda x: 0 if x <= 13 else 1)
-
-print("\n🔹 Label counts:")
-print("Anxiety_Binary:\n", df["Anxiety_Binary"].value_counts())
-print("Stress_Binary:\n", df["Stress_Binary"].value_counts())
-print("Depression_Binary:\n", df["Depression_Binary"].value_counts())
-
+if pss_cols:
+    df["PSS_Total"] = df[pss_cols].sum(axis=1)
+    # standard: <=13 low, >=14 stress present
+    df["Stress_Binary"] = (df["PSS_Total"] >= 14).astype(int)
+else:
+    df["Stress_Binary"] = 0  # fallback
 
 # -------------------------------------------------------
-# STEP 3 — Build Features (X) and Labels (y)
+# STEP 3 — Features (X) and Targets (y)
 # -------------------------------------------------------
 
-# Drop columns that are targets or derived
-#
-# Drop any columns that leak target information or are derived from target scales.
-# In addition to standard labels and totals, the dataset may include columns
-# like ``Anxiety Value`` or ``Stress Value`` which contain the sum of the
-# questionnaire items. Including these as features would lead to data leakage
-# because they are direct functions of the questionnaire responses that define
-# the binary labels. We proactively drop them if present.
 drop_cols = [
-    "Depression Label",
-    "Depression_Binary",
-    "Anxiety_Binary",
-    "Stress_Binary",
-    # values from original scales (may or may not exist)
-    "Depression Value",
-    "Anxiety Value",
-    "Stress Value",
-    # totals derived internally (used to create binary labels)
-    "GAD_Total",
-    "PSS_Total",
+    "Depression Label", "Depression Value",
+    "Anxiety Label", "Anxiety Value",
+    "Stress Label", "Stress Value",
+    "Depression_Binary", "Anxiety_Binary", "Stress_Binary",
+    "GAD_Total", "PSS_Total", "PHQ_Total"
 ]
+
 drop_cols = [c for c in drop_cols if c in df.columns]
 
 X = df.drop(columns=drop_cols)
@@ -101,200 +84,207 @@ y_anx = df["Anxiety_Binary"]
 y_str = df["Stress_Binary"]
 y_dep = df["Depression_Binary"]
 
-print("\n🔹 Feature shape:", X.shape)
-
-# Identify categorical and numeric columns
+# Identify types
 categorical_cols = X.select_dtypes(include=["object"]).columns.tolist()
 numeric_cols = X.select_dtypes(exclude=["object"]).columns.tolist()
 
-
 # -------------------------------------------------------
-# STEP 4 — Preprocessing Pipelines
+# STEP 4 — Preprocessing pipeline (for final models)
 # -------------------------------------------------------
 
-# For numeric features: impute missing values then scale
-numeric_preprocessor = Pipeline([
-    ("imputer", SimpleImputer(strategy="mean")),
-    ("scaler", StandardScaler()),
+numeric_transformer = Pipeline(steps=[
+    ("imputer", SimpleImputer(strategy="median")),
+    ("scaler", StandardScaler())
 ])
 
-# For categorical features: impute missing values, convert to string then one-hot encode.
-#
-# Casting to string avoids a TypeError in OneHotEncoder when categories contain a mix
-# of numeric and textual values. Without this, sklearn may call np.isnan on objects
-# that are not numbers, leading to ``TypeError: ufunc 'isnan' not supported``.
-from sklearn.preprocessing import FunctionTransformer  # Imported here to avoid unused import error
-
-categorical_preprocessor = Pipeline([
+categorical_transformer = Pipeline(steps=[
     ("imputer", SimpleImputer(strategy="most_frequent")),
-    ("to_str", FunctionTransformer(lambda x: x.astype(str))),
-    ("encoder", OneHotEncoder(handle_unknown="ignore")),
+    ("onehot", OneHotEncoder(handle_unknown="ignore"))
 ])
 
-# Combine preprocessors
 preprocessor = ColumnTransformer(
     transformers=[
-        ("cat", categorical_preprocessor, categorical_cols),
-        ("num", numeric_preprocessor, numeric_cols),
+        ("num", numeric_transformer, numeric_cols),
+        ("cat", categorical_transformer, categorical_cols),
     ]
 )
 
-
 # -------------------------------------------------------
-# STEP 5 — Train/Test Split
-# -------------------------------------------------------
-
-X_train, X_test, y_anx_train, y_anx_test, y_str_train, y_str_test, y_dep_train, y_dep_test = train_test_split(
-    X, y_anx, y_str, y_dep,
-    test_size=0.2,
-    random_state=42,
-    stratify=y_dep,
-)
-
-
-# -------------------------------------------------------
-# STEP 6 — Build ML Pipelines
+# STEP 5 — Train 3 Logistic Regression models
+# (train on full data for deployment simplicity)
 # -------------------------------------------------------
 
-def make_model():
-    """Create a logistic regression model pipeline with preprocessing."""
-    clf = LogisticRegression(
+def make_clf():
+    return LogisticRegression(
         class_weight="balanced",
         max_iter=1000,
-        solver="liblinear",
+        solver="liblinear"
     )
-    return Pipeline([
-        ("preprocess", preprocessor),
-        ("classifier", clf),
-    ])
 
-# Instantiate three separate models
-anxiety_model = make_model()
-stress_model = make_model()
-depression_model = make_model()
+anxiety_model = Pipeline(steps=[
+    ("preprocess", preprocessor),
+    ("clf", make_clf())
+])
+stress_model = Pipeline(steps=[
+    ("preprocess", preprocessor),
+    ("clf", make_clf())
+])
+depression_model = Pipeline(steps=[
+    ("preprocess", preprocessor),
+    ("clf", make_clf())
+])
 
-
-# -------------------------------------------------------
-# STEP 7 — Train Models
-# -------------------------------------------------------
-
-print("\n🔹 Training Anxiety model ...")
-anxiety_model.fit(X_train, y_anx_train)
-print("🔹 Training Stress model ...")
-stress_model.fit(X_train, y_str_train)
-print("🔹 Training Depression model ...")
-depression_model.fit(X_train, y_dep_train)
-
+# Fit models
+anxiety_model.fit(X, y_anx)
+stress_model.fit(X, y_str)
+depression_model.fit(X, y_dep)
 
 # -------------------------------------------------------
-# STEP 8 — Evaluate Models (Console Only)
+# STEP 6 — Numeric-only models for XAI
 # -------------------------------------------------------
 
-def _evaluate(name: str, model: Pipeline, X_val, y_val):
-    print(f"\n===== {name} Evaluation =====")
-    preds = model.predict(X_val)
-    print("Accuracy:", accuracy_score(y_val, preds))
-    print(classification_report(y_val, preds, digits=4))
-    print("Confusion Matrix:\n", confusion_matrix(y_val, preds))
+# Build numeric-only dataframe safely
+x_numeric = X[numeric_cols].copy()
 
-_evaluate("Anxiety", anxiety_model, X_test, y_anx_test)
-_evaluate("Stress", stress_model, X_test, y_str_test)
-_evaluate("Depression", depression_model, X_test, y_dep_test)
+# convert everything to numeric, coerce errors
+for col in x_numeric.columns:
+    x_numeric[col] = pd.to_numeric(x_numeric[col], errors="coerce")
 
+# fill missing
+x_numeric = x_numeric.fillna(x_numeric.median(numeric_only=True))
+
+anx_clf_num = make_clf()
+str_clf_num = make_clf()
+dep_clf_num = make_clf()
+
+anx_clf_num.fit(x_numeric, y_anx)
+str_clf_num.fit(x_numeric, y_str)
+dep_clf_num.fit(x_numeric, y_dep)
 
 # -------------------------------------------------------
-# STEP 9 — Overall Mental Health Determination
+# STEP 7 — Helper: determine main issue
 # -------------------------------------------------------
 
 def determine_main_issue(anx: int, stress: int, dep: int) -> str:
-    """Determine the dominant condition given three binary predictions."""
+    """
+    Determine dominant mental-health issue from 3 binary flags.
+    Priority: Depression > Anxiety > Stress
+    """
     if anx == 0 and stress == 0 and dep == 0:
-        return "No major mental-health issue"
-    # Give priority: Depression > Anxiety > Stress
+        return "No major issue"
+
+    # All present
+    if anx == 1 and stress == 1 and dep == 1:
+        return "Depression-dominant"
+
+    # Two present
+    if dep == 1 and anx == 1 and stress == 0:
+        return "Depression-dominant"
+    if dep == 1 and stress == 1 and anx == 0:
+        return "Depression-dominant"
+    if anx == 1 and stress == 1 and dep == 0:
+        return "Anxiety-dominant"
+
+    # Single present
     if dep == 1:
         return "Depression-dominant"
     if anx == 1:
         return "Anxiety-dominant"
     if stress == 1:
         return "Stress-dominant"
-    return "Mixed / Uncertain"
+
+    return "No major issue"
 
 
 # -------------------------------------------------------
-# STEP 10 — Predict for a Single Student
+# STEP 8 — Risk Levels (score-based, for UI only)
+# -------------------------------------------------------
+
+def risk_levels_for_student(student_dict: dict):
+    """
+    Compute textual risk levels (no scores) for Stress, Anxiety, Depression
+    using PSS, GAD, PHQ items in the student_dict.
+    """
+    # Stress (PSS-10, 0–40)
+    pss_vals = [student_dict.get(f"PSS{i}", 0) for i in range(1, 11)]
+    pss_total = sum(pss_vals)
+
+    if pss_total <= 13:
+        stress_level = "Low"
+    elif pss_total <= 26:
+        stress_level = "Moderate"
+    else:
+        stress_level = "High"
+
+    # Anxiety (GAD-7, 0–28 adjusted)
+    gad_vals = [student_dict.get(f"GAD{i}", 0) for i in range(1, 8)]
+    gad_total = sum(gad_vals)
+
+    if gad_total <= 6:
+        anx_level = "Minimal"
+    elif gad_total <= 12:
+        anx_level = "Mild"
+    elif gad_total <= 19:
+        anx_level = "Moderate"
+    else:
+        anx_level = "Severe"
+
+    # Depression (PHQ-9, 0–36 adjusted)
+    phq_vals = [student_dict.get(f"PHQ{i}", 0) for i in range(1, 10)]
+    phq_total = sum(phq_vals)
+
+    if phq_total <= 6:
+        dep_level = "Minimal"
+    elif phq_total <= 13:
+        dep_level = "Mild"
+    elif phq_total <= 19:
+        dep_level = "Moderate"
+    elif phq_total <= 25:
+        dep_level = "Moderately Severe"
+    else:
+        dep_level = "Severe"
+
+    return {
+        "Stress": stress_level,
+        "Anxiety": anx_level,
+        "Depression": dep_level,
+    }
+
+# -------------------------------------------------------
+# STEP 9 — Public function: predict_for_student
 # -------------------------------------------------------
 
 def predict_for_student(student_dict: dict):
     """
-    Accept a dictionary of student features and return binary predictions for
-    anxiety, stress and depression along with the overall mental health status.
+    Student dict must contain:
+        Age, Gender, University, Department, Academic_Year,
+        Current_CGPA, waiver_or_scholarship,
+        PSS1..PSS10, GAD1..GAD7, PHQ1..PHQ9
+    Extra keys are ignored; missing keys are filled with NaN.
     """
-    new_df = pd.DataFrame([student_dict])
-    # Ensure all expected columns exist in the input
+    # Build single-row DataFrame
+    row = pd.DataFrame([student_dict])
+
+    # Ensure all training columns present
     for col in X.columns:
-        if col not in new_df.columns:
-            new_df[col] = np.nan
-    new_df = new_df[X.columns]
+        if col not in row.columns:
+            row[col] = np.nan
 
-    anx_pred = anxiety_model.predict(new_df)[0]
-    str_pred = stress_model.predict(new_df)[0]
-    dep_pred = depression_model.predict(new_df)[0]
+    # Order columns
+    row = row[X.columns]
 
-    main_issue = determine_main_issue(anx_pred, str_pred, dep_pred)
+    anx = int(anxiety_model.predict(row)[0])
+    stress = int(stress_model.predict(row)[0])
+    dep = int(depression_model.predict(row)[0])
 
-    return anx_pred, str_pred, dep_pred, main_issue
+    main_issue = determine_main_issue(anx, stress, dep)
 
+    return anx, stress, dep, main_issue
 
-# -------------------------------------------------------
-# STEP 11 — SAFE XAI (Numeric-Only Logistic Regression)
-# -------------------------------------------------------
-
-print("\n🔹 Building SAFE XAI numeric models...")
-
-def safe_numeric_lr(X_train_num: pd.DataFrame, y_train_num: pd.Series):
-    """
-    Train a logistic regression on numeric features only, handling missing values
-    by filling with the column mean and ensuring all values are numeric.
-    Returns: (classifier, scaler)
-    """
-    X_train_num = X_train_num.apply(pd.to_numeric, errors="coerce").fillna(0.0)
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X_train_num)
-    clf = LogisticRegression(
-        class_weight="balanced",
-        max_iter=1000,
-        solver="liblinear",
-    )
-    clf.fit(X_scaled, y_train_num)
-    return clf, scaler
-
-# Force numeric conversion on the entire numeric subset and fill missing values
-x_numeric = df[numeric_cols].apply(pd.to_numeric, errors="coerce").fillna(0.0)
-
-Xn_train, Xn_test, yn_anx_train, yn_anx_test, yn_str_train, yn_str_test, yn_dep_train, yn_dep_test = train_test_split(
-    x_numeric, y_anx, y_str, y_dep,
-    test_size=0.2,
-    random_state=42,
-    stratify=y_dep,
-)
-
-anx_clf_num, _ = safe_numeric_lr(Xn_train, yn_anx_train)
-str_clf_num, _ = safe_numeric_lr(Xn_train, yn_str_train)
-dep_clf_num, _ = safe_numeric_lr(Xn_train, yn_dep_train)
-
-print("✅ SAFE XAI models ready.")
-
-
-# -------------------------------------------------------
-# This module is ready for import.
-# Functions exported: predict_for_student, determine_main_issue
-# Also exported: anx_clf_num, str_clf_num, dep_clf_num, x_numeric
-# These are used by app.py for XAI display.
-# -------------------------------------------------------
 
 if __name__ == "__main__":
-    # Basic test: run a prediction on the first row of the dataset
+    # Simple internal test (only if you run this file directly)
     sample = X.iloc[0].to_dict()
-    anx, stress, dep, main = predict_for_student(sample)
-    print("\nSample prediction:")
-    print(f"Anxiety: {anx}, Stress: {stress}, Depression: {dep}, Overall: {main}")
+    a, s, d, m = predict_for_student(sample)
+    print("Sample prediction -> Anxiety:", a, "Stress:", s, "Depression:", d, "Main:", m)
+    print("Sample risk:", risk_levels_for_student(sample))
